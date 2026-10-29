@@ -2,7 +2,7 @@
 
 **Find the moments worth watching.**
 
-Howlix is an AI-powered video clipping product by Wolvesgang Digital. This repository contains the Milestone 2 ingestion foundation: a polished Next.js workspace, FastAPI APIs, Supabase Postgres metadata, direct browser-to-Cloudflare-R2 multipart uploads, and a local FFprobe validation worker.
+Howlix is an AI-powered video clipping product by Wolvesgang Digital. This repository contains the verified ingestion pipeline and Milestone 3 transcription foundation: a polished Next.js workspace, FastAPI APIs, Supabase Postgres metadata, direct browser-to-Cloudflare-R2 multipart uploads, FFprobe validation, and retryable word-timestamp transcription.
 
 > This remains a single-user environment with no application authentication. Production-domain configuration is prepared for `howlix.wolvesgang.digital`, but the dashboard and API must stay behind a private access gate until authentication and authorization are implemented.
 
@@ -58,6 +58,8 @@ Copy-Item .env.example .env
 
 Open the Supabase dashboard, select the project, click **Connect**, choose the **Session pooler** connection for reliable IPv4 development, and place that URI in the root `.env` as `HOWLIX_DATABASE_URL`. Replace the password placeholder and retain `sslmode=require`. Password characters such as `@`, `#`, `?`, or spaces must be URL-encoded. Keep `HOWLIX_DATABASE_SCHEMA=howlix`; this isolates Howlix from other applications sharing the Supabase project. Then add credentials scoped to the separate private `howlix-media` R2 bucket as described in [Cloudflare R2 setup](docs/cloudflare-r2-setup.md).
 
+For cloud transcription, create a Groq API key and set `GROQ_API_KEY` in the root `.env`. It is read only by FastAPI and the worker. `TRANSCRIPTION_PROVIDER=groq` and `GROQ_TRANSCRIPTION_MODEL=whisper-large-v3-turbo` are the defaults. Never place the key in a `NEXT_PUBLIC_*` variable.
+
 Then apply the schema:
 
 ```powershell
@@ -103,7 +105,7 @@ cd frontend
 npm run dev
 ```
 
-Validation worker:
+Validation and transcription worker:
 
 ```powershell
 cd backend
@@ -142,7 +144,17 @@ cd backend
 python -m pytest -m integration tests\test_r2_integration.py
 ```
 
-## Milestone 2 scope
+The optional live Groq test requires explicit opt-in and a small speech-audio fixture:
+
+```powershell
+$env:RUN_GROQ_INTEGRATION_TESTS="true"
+$env:GROQ_INTEGRATION_AUDIO_PATH="C:\path\to\speech.flac"
+cd backend
+.\.venv\Scripts\Activate.ps1
+python -m pytest -m integration tests\test_groq_integration.py
+```
+
+## Implemented scope
 
 Implemented:
 
@@ -157,16 +169,20 @@ Implemented:
 - FFprobe container, duration, codec, resolution, and frame-rate validation
 - Private, short-lived video previews and project media status pages
 - Mocked R2 tests plus an explicit opt-in integration test
+- Provider-neutral Groq and optional faster-whisper transcription
+- FFmpeg speech-audio extraction and overlapping chunk processing
+- Persisted transcripts, segments, words, language, real stages, and retries
+- Searchable timestamped transcript viewer with video seeking
 
 Not implemented:
 
-- Transcription or AI analysis
+- Hook detection, moment scoring, or automatic clip selection
 - Clip generation, cropping, caption rendering, or exports
 - Authentication, billing, or public deployment
 
 Media validation runs as a background worker, but distributed job infrastructure is intentionally not introduced yet.
 
-See [the architecture](docs/architecture.md), [Cloudflare R2 setup](docs/cloudflare-r2-setup.md), [Supabase setup](docs/supabase.md), [roadmap](docs/roadmap.md), and [Milestone 2 notes](docs/milestone-2.md) for more detail.
+See [the architecture](docs/architecture.md), [Cloudflare R2 setup](docs/cloudflare-r2-setup.md), [Supabase setup](docs/supabase.md), [roadmap](docs/roadmap.md), [Milestone 2 notes](docs/milestone-2.md), and [Milestone 3 notes](docs/milestone-3.md) for more detail.
 
 Production URL and Git-connected deployment preparation are documented in [deployment.md](docs/deployment.md). The intended layout is `https://howlix.wolvesgang.digital` for Next.js and `https://api.howlix.wolvesgang.digital` for FastAPI.
 

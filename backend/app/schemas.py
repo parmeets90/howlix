@@ -9,6 +9,7 @@ from app.models import (
     MediaAssetStatus,
     ProcessingJobStatus,
     ProjectStatus,
+    TranscriptStatus,
     UploadSessionStatus,
 )
 
@@ -110,6 +111,9 @@ class ProcessingJobSummary(BaseModel):
     attempts: int
     max_attempts: int
     error_message: str | None
+    progress_stage: str | None
+    progress_completed: int | None
+    progress_total: int | None
     started_at: datetime | None
     finished_at: datetime | None
 
@@ -133,6 +137,43 @@ class MediaAssetResponse(BaseModel):
     preview_url: str | None = None
     preview_url_expires_at: datetime | None = None
     latest_job: ProcessingJobSummary | None = None
+
+
+class TranscriptWordResponse(BaseModel):
+    id: uuid.UUID
+    segment_id: uuid.UUID | None
+    start_ms: int
+    end_ms: int
+    word: str
+    confidence: float | None
+
+
+class TranscriptSegmentResponse(BaseModel):
+    id: uuid.UUID
+    start_ms: int
+    end_ms: int
+    text: str
+
+
+class TranscriptResponse(BaseModel):
+    id: uuid.UUID
+    asset_id: uuid.UUID
+    provider: str
+    model: str
+    language: str | None
+    status: TranscriptStatus
+    full_text: str | None
+    segments: list[TranscriptSegmentResponse]
+    words: list[TranscriptWordResponse]
+    created_at: datetime
+    updated_at: datetime
+
+
+class TranscriptionStatusResponse(BaseModel):
+    asset_id: uuid.UUID
+    transcript_id: uuid.UUID | None
+    transcript_status: TranscriptStatus | None
+    job: ProcessingJobSummary | None
 
 
 class ErrorDetail(BaseModel):

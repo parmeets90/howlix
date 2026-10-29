@@ -36,6 +36,9 @@ def job_summary(job: ProcessingJob | None) -> ProcessingJobSummary | None:
         attempts=job.attempts,
         max_attempts=job.max_attempts,
         error_message=job.error_message,
+        progress_stage=job.progress_stage,
+        progress_completed=job.progress_completed,
+        progress_total=job.progress_total,
         started_at=job.started_at,
         finished_at=job.finished_at,
     )

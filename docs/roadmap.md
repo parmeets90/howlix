@@ -24,10 +24,13 @@ Milestone 2 establishes trustworthy ingestion before adding AI. Redis, RQ, trans
 
 ## Milestone 3 — Transcription foundation
 
+Status: implemented in this repository.
+
 - Provider-neutral transcription interface
 - Optional faster-whisper local adapter and Groq cloud adapter
 - Timestamped transcript segments and transcript viewer
 - Job status and retry semantics
+- FFmpeg audio chunking, overlap deduplication, word timestamps, search, and video seeking
 
 ## Milestone 4 — Moment discovery
 

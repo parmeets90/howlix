@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     )
 
     ffprobe_path: str = Field(default="ffprobe", validation_alias="FFPROBE_PATH")
+    ffmpeg_path: str = Field(default="ffmpeg", validation_alias="FFMPEG_PATH")
     ffprobe_timeout_seconds: int = Field(
         default=60, ge=5, le=600, validation_alias="FFPROBE_TIMEOUT_SECONDS"
     )
@@ -77,6 +78,40 @@ class Settings(BaseSettings):
     job_lease_seconds: int = Field(default=300, ge=30, validation_alias="JOB_LEASE_SECONDS")
     processing_temp_dir: Path | None = Field(default=None, validation_alias="PROCESSING_TEMP_DIR")
     delete_invalid_media: bool = Field(default=True, validation_alias="DELETE_INVALID_MEDIA")
+    transcription_provider: Literal["groq", "faster-whisper"] = Field(
+        default="groq", validation_alias="TRANSCRIPTION_PROVIDER"
+    )
+    groq_api_key: SecretStr | None = Field(default=None, validation_alias="GROQ_API_KEY")
+    groq_transcription_model: str = Field(
+        default="whisper-large-v3-turbo", validation_alias="GROQ_TRANSCRIPTION_MODEL"
+    )
+    faster_whisper_model: str = Field(
+        default="base", validation_alias="FASTER_WHISPER_MODEL"
+    )
+    transcription_chunk_seconds: int = Field(
+        default=600, ge=30, le=1200, validation_alias="TRANSCRIPTION_CHUNK_SECONDS"
+    )
+    transcription_chunk_overlap_seconds: float = Field(
+        default=1.0, ge=0, le=10, validation_alias="TRANSCRIPTION_CHUNK_OVERLAP_SECONDS"
+    )
+    transcription_max_chunk_mb: int = Field(
+        default=24, ge=1, le=24, validation_alias="TRANSCRIPTION_MAX_CHUNK_MB"
+    )
+    transcription_subprocess_timeout_seconds: int = Field(
+        default=300, ge=30, le=1800, validation_alias="TRANSCRIPTION_SUBPROCESS_TIMEOUT_SECONDS"
+    )
+    transcription_api_max_retries: int = Field(
+        default=3, ge=0, le=6, validation_alias="TRANSCRIPTION_API_MAX_RETRIES"
+    )
+    transcription_retry_base_seconds: int = Field(
+        default=5, ge=0, le=300, validation_alias="TRANSCRIPTION_RETRY_BASE_SECONDS"
+    )
+    run_groq_integration_tests: bool = Field(
+        default=False, validation_alias="RUN_GROQ_INTEGRATION_TESTS"
+    )
+    groq_integration_audio_path: Path | None = Field(
+        default=None, validation_alias="GROQ_INTEGRATION_AUDIO_PATH"
+    )
     run_r2_integration_tests: bool = Field(
         default=False,
         validation_alias=AliasChoices("RUN_R2_INTEGRATION_TESTS", "HOWLIX_RUN_R2_INTEGRATION_TESTS"),
@@ -104,7 +139,7 @@ class Settings(BaseSettings):
     def normalize_public_app_url(cls, value: str) -> str:
         return value.rstrip("/")
 
-    @field_validator("processing_temp_dir", mode="before")
+    @field_validator("processing_temp_dir", "groq_integration_audio_path", mode="before")
     @classmethod
     def parse_optional_path(cls, value: object) -> object:
         return None if value == "" else value
@@ -113,6 +148,8 @@ class Settings(BaseSettings):
     def derive_r2_endpoint(self) -> "Settings":
         if not self.r2_endpoint_url and self.r2_account_id:
             self.r2_endpoint_url = f"https://{self.r2_account_id}.r2.cloudflarestorage.com"
+        if self.transcription_chunk_overlap_seconds >= self.transcription_chunk_seconds:
+            raise ValueError("Transcription chunk overlap must be shorter than each chunk.")
         return self
 
     @property
@@ -136,6 +173,10 @@ class Settings(BaseSettings):
     @property
     def max_project_storage_bytes(self) -> int:
         return self.max_project_storage_mb * 1024 * 1024
+
+    @property
+    def transcription_max_chunk_bytes(self) -> int:
+        return self.transcription_max_chunk_mb * 1024 * 1024
 
     def require_r2(self) -> "Settings":
         missing = [

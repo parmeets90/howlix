@@ -1,7 +1,7 @@
 [project]
 name = "howlix-backend"
 version = "0.1.0"
-description = "Howlix API and media validation worker"
+description = "Howlix API, media validation, and transcription worker"
 requires-python = ">=3.11"
 
 [tool.pytest.ini_options]

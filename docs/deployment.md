@@ -38,6 +38,8 @@ HOWLIX_PUBLIC_APP_URL=https://howlix.wolvesgang.digital
 HOWLIX_CORS_ORIGINS=https://howlix.wolvesgang.digital
 HOWLIX_ALLOWED_HOSTS=api.howlix.wolvesgang.digital
 R2_BUCKET_NAME=howlix-media
+TRANSCRIPTION_PROVIDER=groq
+GROQ_API_KEY=<hosting-secret>
 NEXT_PUBLIC_API_URL=https://api.howlix.wolvesgang.digital
 ```
 

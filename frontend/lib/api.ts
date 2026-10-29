@@ -29,7 +29,8 @@ export class ApiError extends Error {
 
 export type UploadSessionStatus = "initiated" | "uploading" | "completed" | "aborted" | "expired" | "failed";
 export type MediaAssetStatus = "pending_upload" | "uploading" | "uploaded" | "validating" | "ready" | "rejected" | "failed" | "aborted";
-export type ProcessingJobStatus = "queued" | "processing" | "succeeded" | "failed";
+export type ProcessingJobStatus = "queued" | "processing" | "retry" | "succeeded" | "failed";
+export type TranscriptStatus = "queued" | "processing" | "retry" | "completed" | "failed";
 
 export type UploadSession = {
   id: string;
@@ -69,9 +70,49 @@ export type MediaAsset = {
     attempts: number;
     max_attempts: number;
     error_message: string | null;
+    progress_stage: string | null;
+    progress_completed: number | null;
+    progress_total: number | null;
     started_at: string | null;
     finished_at: string | null;
   } | null;
+};
+
+export type TranscriptSegment = {
+  id: string;
+  start_ms: number;
+  end_ms: number;
+  text: string;
+};
+
+export type TranscriptWord = {
+  id: string;
+  segment_id: string | null;
+  start_ms: number;
+  end_ms: number;
+  word: string;
+  confidence: number | null;
+};
+
+export type Transcript = {
+  id: string;
+  asset_id: string;
+  provider: string;
+  model: string;
+  language: string | null;
+  status: TranscriptStatus;
+  full_text: string | null;
+  segments: TranscriptSegment[];
+  words: TranscriptWord[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type TranscriptionStatus = {
+  asset_id: string;
+  transcript_id: string | null;
+  transcript_status: TranscriptStatus | null;
+  job: MediaAsset["latest_job"];
 };
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
@@ -167,5 +208,17 @@ export function listProjectMedia(projectId: string): Promise<MediaAsset[]> {
 
 export function getMediaAsset(assetId: string): Promise<MediaAsset> {
   return request(`/api/v1/media/${assetId}`, { cache: "no-store" });
+}
+
+export function requestTranscription(assetId: string): Promise<TranscriptionStatus> {
+  return request(`/api/v1/media/${assetId}/transcribe`, { method: "POST" });
+}
+
+export function getTranscript(assetId: string): Promise<Transcript> {
+  return request(`/api/v1/media/${assetId}/transcript`, { cache: "no-store" });
+}
+
+export function getTranscriptionStatus(assetId: string): Promise<TranscriptionStatus> {
+  return request(`/api/v1/media/${assetId}/transcription-status`, { cache: "no-store" });
 }
 

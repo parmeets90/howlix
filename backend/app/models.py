@@ -53,12 +53,22 @@ class UploadSessionStatus(str, enum.Enum):
 
 class ProcessingJobType(str, enum.Enum):
     VALIDATE_MEDIA = "validate_media"
+    TRANSCRIBE_MEDIA = "transcribe_media"
 
 
 class ProcessingJobStatus(str, enum.Enum):
     QUEUED = "queued"
     PROCESSING = "processing"
+    RETRY = "retry"
     SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class TranscriptStatus(str, enum.Enum):
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    RETRY = "retry"
+    COMPLETED = "completed"
     FAILED = "failed"
 
 
@@ -135,6 +145,9 @@ class MediaAsset(Base):
     processing_jobs: Mapped[list["ProcessingJob"]] = relationship(
         back_populates="asset", cascade="all, delete-orphan"
     )
+    transcript: Mapped["Transcript | None"] = relationship(
+        back_populates="asset", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class UploadSession(Base):
@@ -189,6 +202,9 @@ class ProcessingJob(Base):
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    progress_stage: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    progress_completed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    progress_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
     claimed_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -203,4 +219,86 @@ class ProcessingJob(Base):
     )
 
     asset: Mapped[MediaAsset] = relationship(back_populates="processing_jobs")
+
+
+class Transcript(Base):
+    __tablename__ = "transcripts"
+    __table_args__ = (
+        UniqueConstraint("asset_id", name="uq_transcripts_asset_id"),
+        Index("ix_transcripts_status", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    asset_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("media_assets.id", ondelete="CASCADE"), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    language: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    status: Mapped[TranscriptStatus] = mapped_column(
+        enum_type(TranscriptStatus), nullable=False, default=TranscriptStatus.QUEUED
+    )
+    full_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    asset: Mapped[MediaAsset] = relationship(back_populates="transcript")
+    segments: Mapped[list["TranscriptSegment"]] = relationship(
+        back_populates="transcript",
+        cascade="all, delete-orphan",
+        order_by="TranscriptSegment.start_ms",
+    )
+    words: Mapped[list["TranscriptWord"]] = relationship(
+        back_populates="transcript",
+        cascade="all, delete-orphan",
+        order_by="TranscriptWord.start_ms",
+    )
+
+
+class TranscriptSegment(Base):
+    __tablename__ = "transcript_segments"
+    __table_args__ = (
+        CheckConstraint("start_ms >= 0", name="ck_transcript_segments_start"),
+        CheckConstraint("end_ms >= start_ms", name="ck_transcript_segments_range"),
+        Index("ix_transcript_segments_transcript_start", "transcript_id", "start_ms"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    transcript_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("transcripts.id", ondelete="CASCADE"), nullable=False
+    )
+    start_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+
+    transcript: Mapped[Transcript] = relationship(back_populates="segments")
+    words: Mapped[list["TranscriptWord"]] = relationship(back_populates="segment")
+
+
+class TranscriptWord(Base):
+    __tablename__ = "transcript_words"
+    __table_args__ = (
+        CheckConstraint("start_ms >= 0", name="ck_transcript_words_start"),
+        CheckConstraint("end_ms >= start_ms", name="ck_transcript_words_range"),
+        Index("ix_transcript_words_transcript_start", "transcript_id", "start_ms"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    transcript_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("transcripts.id", ondelete="CASCADE"), nullable=False
+    )
+    segment_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("transcript_segments.id", ondelete="SET NULL"), nullable=True
+    )
+    start_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    word: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    transcript: Mapped[Transcript] = relationship(back_populates="words")
+    segment: Mapped[TranscriptSegment | None] = relationship(back_populates="words")
 

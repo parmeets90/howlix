@@ -26,6 +26,18 @@ def test_real_r2_multipart_round_trip_only_when_explicitly_enabled() -> None:
     try:
         payload = b"howlix-r2-integration-test"
         url = storage.generate_upload_part_url(object_key, upload_id, 1, 300)
+        preflight = httpx.options(
+            url,
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "PUT",
+                "Access-Control-Request-Headers": "content-type",
+            },
+            timeout=30,
+        )
+        preflight.raise_for_status()
+        assert preflight.headers.get("access-control-allow-origin") == "http://localhost:3000"
+        assert "PUT" in preflight.headers.get("access-control-allow-methods", "")
         response = httpx.put(url, content=payload, timeout=30)
         response.raise_for_status()
         etag = response.headers["etag"]
@@ -34,6 +46,10 @@ def test_real_r2_multipart_round_trip_only_when_explicitly_enabled() -> None:
         storage.complete_multipart_upload(object_key, upload_id, parts)
         completed = True
         assert storage.head_object(object_key).content_length == len(payload)
+        get_url = storage.generate_get_url(object_key, 300)
+        download = httpx.get(get_url, timeout=30)
+        download.raise_for_status()
+        assert download.content == payload
     finally:
         if completed:
             storage.delete_object(object_key)

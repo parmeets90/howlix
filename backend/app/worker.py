@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Event, Thread
 
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings, get_settings
@@ -20,6 +20,10 @@ from app.models import (
     ProcessingJob,
     ProcessingJobStatus,
     ProcessingJobType,
+    Transcript,
+    TranscriptSegment,
+    TranscriptStatus,
+    TranscriptWord,
     UploadSession,
     UploadSessionStatus,
     utc_now,
@@ -31,6 +35,15 @@ from app.services.media_probe import (
     probe_media,
 )
 from app.services.storage import StorageError, StorageService, get_storage_service
+from app.services.audio_preprocessing import AudioPreprocessingError, extract_audio_chunks
+from app.services.transcription import (
+    EmptyTranscriptError,
+    PermanentTranscriptionError,
+    TranscriptionProvider,
+    TransientTranscriptionError,
+    get_transcription_provider,
+    merge_chunk_results,
+)
 
 
 logger = logging.getLogger("howlix.worker")
@@ -57,14 +70,26 @@ def claim_next_job(
             job.claimed_by = None
             job.lease_expires_at = None
             job.error_message = job.error_message or "Job lease expired after all attempts."
+            if job.job_type == ProcessingJobType.TRANSCRIBE_MEDIA:
+                transcript = db.scalar(
+                    select(Transcript).where(Transcript.asset_id == job.asset_id)
+                )
+                if transcript is not None:
+                    transcript.status = TranscriptStatus.FAILED
 
         statement = (
             select(ProcessingJob)
             .where(
-                ProcessingJob.job_type == ProcessingJobType.VALIDATE_MEDIA,
                 ProcessingJob.attempts < ProcessingJob.max_attempts,
                 or_(
                     ProcessingJob.status == ProcessingJobStatus.QUEUED,
+                    (
+                        (ProcessingJob.status == ProcessingJobStatus.RETRY)
+                        & (
+                            (ProcessingJob.lease_expires_at.is_(None))
+                            | (ProcessingJob.lease_expires_at < now)
+                        )
+                    ),
                     (
                         (ProcessingJob.status == ProcessingJobStatus.PROCESSING)
                         & (ProcessingJob.lease_expires_at < now)
@@ -134,12 +159,16 @@ class MediaValidationWorker:
         storage: StorageService,
         session_factory: sessionmaker[Session] = SessionLocal,
         probe: ProbeFunction = probe_media,
+        transcription_provider: TranscriptionProvider | None = None,
+        audio_extractor=extract_audio_chunks,
         worker_id: str | None = None,
     ) -> None:
         self.settings = settings
         self.storage = storage
         self.session_factory = session_factory
         self.probe = probe
+        self.transcription_provider = transcription_provider
+        self.audio_extractor = audio_extractor
         self.worker_id = worker_id or f"worker-{uuid.uuid4().hex[:12]}"
 
     def cleanup_expired_uploads(self) -> int:
@@ -179,10 +208,16 @@ class MediaValidationWorker:
             job_id = claim_next_job(db, self.worker_id, self.settings)
         if job_id is None:
             return False
-        self._process_job(job_id)
+        with self.session_factory() as db:
+            job = db.get(ProcessingJob, job_id)
+            job_type = job.job_type if job else None
+        if job_type == ProcessingJobType.TRANSCRIBE_MEDIA:
+            self._process_transcription_job(job_id)
+        else:
+            self._process_validation_job(job_id)
         return True
 
-    def _process_job(self, job_id: uuid.UUID) -> None:
+    def _process_validation_job(self, job_id: uuid.UUID) -> None:
         with self.session_factory() as db:
             job = db.get(ProcessingJob, job_id)
             if job is None or job.claimed_by != self.worker_id:
@@ -275,6 +310,7 @@ class MediaValidationWorker:
     def _mark_job_succeeded(job: ProcessingJob) -> None:
         job.status = ProcessingJobStatus.SUCCEEDED
         job.error_message = None
+        job.progress_stage = "completed"
         job.finished_at = utc_now()
         job.claimed_by = None
         job.lease_expires_at = None
@@ -298,6 +334,225 @@ class MediaValidationWorker:
             job.finished_at = utc_now()
             if asset is not None:
                 asset.status = MediaAssetStatus.FAILED
+        db.commit()
+
+    def _set_progress(
+        self,
+        job_id: uuid.UUID,
+        stage: str,
+        completed: int | None = None,
+        total: int | None = None,
+    ) -> None:
+        with self.session_factory() as db:
+            job = db.get(ProcessingJob, job_id)
+            if job is None or job.claimed_by != self.worker_id:
+                return
+            job.progress_stage = stage
+            job.progress_completed = completed
+            job.progress_total = total
+            db.commit()
+
+    def _process_transcription_job(self, job_id: uuid.UUID) -> None:
+        with self.session_factory() as db:
+            job = db.get(ProcessingJob, job_id)
+            if job is None or job.claimed_by != self.worker_id:
+                return
+            asset = db.get(MediaAsset, job.asset_id)
+            transcript = db.scalar(
+                select(Transcript).where(Transcript.asset_id == job.asset_id)
+            )
+            if asset is None or transcript is None:
+                self._finish_transcription_failure(
+                    db, job, transcript, "Transcription state is missing.", retryable=False
+                )
+                return
+            transcript.status = TranscriptStatus.PROCESSING
+            job.progress_stage = "downloading"
+            job.progress_completed = None
+            job.progress_total = None
+            db.commit()
+            suffix = Path(asset.original_filename).suffix.lower()
+            object_key = asset.object_key
+            expected_size = asset.file_size_bytes
+            duration = asset.duration_seconds
+            has_audio = bool(asset.audio_codec)
+
+        if not has_audio:
+            with self.session_factory() as db:
+                job = db.get(ProcessingJob, job_id)
+                transcript = db.scalar(
+                    select(Transcript).where(Transcript.asset_id == job.asset_id)
+                ) if job else None
+                if job:
+                    self._finish_transcription_failure(
+                        db, job, transcript, "This video has no supported audio stream.", retryable=False
+                    )
+            return
+
+        temp_root = self.settings.processing_temp_dir
+        if temp_root is not None:
+            temp_root = temp_root.resolve()
+            temp_root.mkdir(parents=True, exist_ok=True)
+        try:
+            with LeaseHeartbeat(
+                self.session_factory,
+                job_id,
+                self.worker_id,
+                self.settings.job_lease_seconds,
+            ):
+                with tempfile.TemporaryDirectory(
+                    prefix="howlix-transcription-", dir=str(temp_root) if temp_root else None
+                ) as temp_directory:
+                    directory = Path(temp_directory).resolve()
+                    source = directory / f"source{suffix}"
+                    self.storage.download_object(object_key, source)
+                    if source.stat().st_size != expected_size:
+                        raise TransientTranscriptionError(
+                            "The downloaded object size does not match its media record."
+                        )
+                    self._set_progress(job_id, "extracting_audio", 0, None)
+                    chunks = self.audio_extractor(
+                        source,
+                        directory / "audio",
+                        duration_seconds=float(duration or 0),
+                        ffmpeg_path=self.settings.ffmpeg_path,
+                        timeout_seconds=self.settings.transcription_subprocess_timeout_seconds,
+                        chunk_seconds=self.settings.transcription_chunk_seconds,
+                        overlap_seconds=self.settings.transcription_chunk_overlap_seconds,
+                        max_chunk_bytes=self.settings.transcription_max_chunk_bytes,
+                        progress=lambda completed, total: self._set_progress(
+                            job_id, "extracting_audio", completed, total
+                        ),
+                    )
+                    provider = self.transcription_provider or get_transcription_provider(
+                        self.settings
+                    )
+                    chunk_results = []
+                    for index, chunk in enumerate(chunks):
+                        self._set_progress(job_id, "transcribing", index, len(chunks))
+                        chunk_results.append((chunk.offset_ms, provider.transcribe(chunk.path)))
+                        self._set_progress(job_id, "transcribing", index + 1, len(chunks))
+                    result = merge_chunk_results(chunk_results)
+
+            with self.session_factory() as db:
+                job = db.get(ProcessingJob, job_id)
+                transcript = db.scalar(
+                    select(Transcript).where(Transcript.asset_id == job.asset_id)
+                ) if job else None
+                if job is None or transcript is None or job.claimed_by != self.worker_id:
+                    return
+                db.execute(
+                    delete(TranscriptWord).where(TranscriptWord.transcript_id == transcript.id)
+                )
+                db.execute(
+                    delete(TranscriptSegment).where(
+                        TranscriptSegment.transcript_id == transcript.id
+                    )
+                )
+                persisted_segments: list[TranscriptSegment] = []
+                for item in result.segments:
+                    segment = TranscriptSegment(
+                        transcript_id=transcript.id,
+                        start_ms=item.start_ms,
+                        end_ms=item.end_ms,
+                        text=item.text,
+                    )
+                    db.add(segment)
+                    persisted_segments.append(segment)
+                db.flush()
+                for item in result.words:
+                    midpoint = (item.start_ms + item.end_ms) // 2
+                    segment = next(
+                        (
+                            candidate
+                            for candidate in persisted_segments
+                            if candidate.start_ms <= midpoint <= candidate.end_ms
+                        ),
+                        None,
+                    )
+                    db.add(
+                        TranscriptWord(
+                            transcript_id=transcript.id,
+                            segment_id=segment.id if segment else None,
+                            start_ms=item.start_ms,
+                            end_ms=item.end_ms,
+                            word=item.word,
+                            confidence=item.confidence,
+                        )
+                    )
+                transcript.language = result.language
+                transcript.full_text = result.text
+                transcript.status = TranscriptStatus.COMPLETED
+                self._mark_job_succeeded(job)
+                job.progress_completed = len(chunk_results)
+                job.progress_total = len(chunk_results)
+                db.commit()
+        except (EmptyTranscriptError, PermanentTranscriptionError, AudioPreprocessingError) as exc:
+            with self.session_factory() as db:
+                job = db.get(ProcessingJob, job_id)
+                transcript = db.scalar(
+                    select(Transcript).where(Transcript.asset_id == job.asset_id)
+                ) if job else None
+                if job:
+                    self._finish_transcription_failure(
+                        db, job, transcript, str(exc), retryable=False
+                    )
+        except (TransientTranscriptionError, StorageError, OSError) as exc:
+            with self.session_factory() as db:
+                job = db.get(ProcessingJob, job_id)
+                transcript = db.scalar(
+                    select(Transcript).where(Transcript.asset_id == job.asset_id)
+                ) if job else None
+                if job:
+                    self._finish_transcription_failure(
+                        db, job, transcript, str(exc), retryable=True
+                    )
+        except Exception as exc:
+            logger.exception("Unexpected transcription worker failure for job %s", job_id)
+            with self.session_factory() as db:
+                job = db.get(ProcessingJob, job_id)
+                transcript = db.scalar(
+                    select(Transcript).where(Transcript.asset_id == job.asset_id)
+                ) if job else None
+                if job:
+                    self._finish_transcription_failure(
+                        db,
+                        job,
+                        transcript,
+                        f"Unexpected transcription failure: {type(exc).__name__}",
+                        retryable=True,
+                    )
+
+    def _finish_transcription_failure(
+        self,
+        db: Session,
+        job: ProcessingJob,
+        transcript: Transcript | None,
+        message: str,
+        *,
+        retryable: bool,
+    ) -> None:
+        job.error_message = message[:2000]
+        job.claimed_by = None
+        if retryable and job.attempts < job.max_attempts:
+            job.status = ProcessingJobStatus.RETRY
+            job.progress_stage = "retry"
+            job.lease_expires_at = utc_now() + timedelta(
+                seconds=min(
+                    300,
+                    self.settings.transcription_retry_base_seconds
+                    * (2 ** max(0, job.attempts - 1)),
+                )
+            )
+            if transcript is not None:
+                transcript.status = TranscriptStatus.RETRY
+        else:
+            job.status = ProcessingJobStatus.FAILED
+            job.progress_stage = "failed"
+            job.finished_at = utc_now()
+            job.lease_expires_at = None
+            if transcript is not None:
+                transcript.status = TranscriptStatus.FAILED
         db.commit()
 
 
