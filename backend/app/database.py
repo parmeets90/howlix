@@ -29,11 +29,14 @@ else:
 
     @event.listens_for(engine, "connect")
     def set_howlix_search_path(dbapi_connection, connection_record) -> None:  # noqa: ARG001
+        previous_autocommit = dbapi_connection.autocommit
+        dbapi_connection.autocommit = True
         cursor = dbapi_connection.cursor()
         try:
             cursor.execute(f'SET search_path TO "{settings.database_schema}"')
         finally:
             cursor.close()
+            dbapi_connection.autocommit = previous_autocommit
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
