@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+import re
+from typing import Literal
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -19,8 +21,20 @@ class Settings(BaseSettings):
     )
 
     database_url: str = Field(validation_alias="HOWLIX_DATABASE_URL")
+    database_schema: str = Field(default="howlix", validation_alias="HOWLIX_DATABASE_SCHEMA")
+    environment: Literal["development", "test", "production"] = Field(
+        default="development", validation_alias="HOWLIX_ENVIRONMENT"
+    )
+    public_app_url: str = Field(
+        default="http://localhost:3000", validation_alias="HOWLIX_PUBLIC_APP_URL"
+    )
     cors_origins_value: str = Field(
-        default="http://localhost:3000", validation_alias="HOWLIX_CORS_ORIGINS"
+        default="http://localhost:3000,https://howlix.wolvesgang.digital",
+        validation_alias="HOWLIX_CORS_ORIGINS",
+    )
+    allowed_hosts_value: str = Field(
+        default="localhost,127.0.0.1,testserver,api.howlix.wolvesgang.digital",
+        validation_alias="HOWLIX_ALLOWED_HOSTS",
     )
 
     r2_account_id: str | None = Field(default=None, validation_alias="R2_ACCOUNT_ID")
@@ -77,6 +91,19 @@ class Settings(BaseSettings):
             return value.replace("postgresql://", "postgresql+psycopg://", 1)
         return value
 
+    @field_validator("database_schema")
+    @classmethod
+    def validate_database_schema(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", normalized):
+            raise ValueError("HOWLIX_DATABASE_SCHEMA must be a safe PostgreSQL identifier.")
+        return normalized
+
+    @field_validator("public_app_url")
+    @classmethod
+    def normalize_public_app_url(cls, value: str) -> str:
+        return value.rstrip("/")
+
     @field_validator("processing_temp_dir", mode="before")
     @classmethod
     def parse_optional_path(cls, value: object) -> object:
@@ -97,6 +124,10 @@ class Settings(BaseSettings):
         return tuple(
             origin.strip() for origin in self.cors_origins_value.split(",") if origin.strip()
         )
+
+    @property
+    def allowed_hosts(self) -> tuple[str, ...]:
+        return tuple(host.strip() for host in self.allowed_hosts_value.split(",") if host.strip())
 
     @property
     def max_upload_size_bytes(self) -> int:

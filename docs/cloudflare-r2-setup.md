@@ -16,7 +16,7 @@ The application serves previews with temporary presigned GET URLs. The bucket mu
 
 1. In R2, open **Manage API tokens**.
 2. Create an account API token with **Object Read & Write** permission.
-3. Scope it to the `howlix-media` bucket only.
+3. Scope it to the `howlix-media` bucket only. Do not reuse a token scoped to another product's bucket.
 4. Record the Access Key ID and Secret Access Key when Cloudflare displays them. The secret is shown once.
 5. Copy `.env.example` to `.env` and set the backend-only values:
 
@@ -40,7 +40,8 @@ Open **R2 Object Storage > howlix-media > Settings > CORS Policy**, choose **Add
 [
   {
     "AllowedOrigins": [
-      "http://localhost:3000"
+      "http://localhost:3000",
+      "https://howlix.wolvesgang.digital"
     ],
     "AllowedMethods": [
       "PUT",
@@ -61,7 +62,7 @@ Open **R2 Object Storage > howlix-media > Settings > CORS Policy**, choose **Add
 ]
 ```
 
-`ETag` exposure is required because the browser must return each uploaded part's ETag to FastAPI. Match the frontend origin exactly, including scheme and port. Cloudflare notes that a policy change can take up to about 30 seconds to propagate.
+`ETag` exposure is required because the browser must return each uploaded part's ETag to FastAPI. Match both frontend origins exactly, including scheme and port. Do not add wildcard origins. Cloudflare notes that a policy change can take up to about 30 seconds to propagate.
 
 Cloudflare reference: [R2 CORS](https://developers.cloudflare.com/r2/buckets/cors/).
 
@@ -141,7 +142,7 @@ Open `http://localhost:3000`, create a project, select an MP4, MOV, or WebM vide
 ### Browser reports a CORS or network error
 
 - Confirm the R2 bucket is still private; public access is not needed.
-- Confirm `AllowedOrigins` exactly matches `http://localhost:3000`.
+- Confirm `AllowedOrigins` contains the exact active origin: `http://localhost:3000` locally or `https://howlix.wolvesgang.digital` in production.
 - Confirm `PUT` is allowed and `Content-Type` is an allowed request header.
 - Confirm `ETag` is exposed. Upload data can reach R2 while completion still fails if JavaScript cannot read that header.
 - Wait 30 seconds after changing the policy and retry.

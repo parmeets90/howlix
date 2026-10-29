@@ -22,9 +22,16 @@ The value should follow this shape, using the exact username and host supplied b
 
 ```dotenv
 HOWLIX_DATABASE_URL=postgresql+psycopg://postgres.PROJECT_REF:URL_ENCODED_PASSWORD@POOLER_HOST:5432/postgres?sslmode=require
+HOWLIX_DATABASE_SCHEMA=howlix
 ```
 
 Do not use the example placeholders literally. Do not add this URI to `frontend/.env.local`, a `NEXT_PUBLIC_*` variable, source code, screenshots, or Git.
+
+## Sharing a Supabase project safely
+
+Howlix may reuse the same Supabase project/account as another Wolvesgang application, but it must not share that application's tables. `HOWLIX_DATABASE_SCHEMA=howlix` gives Howlix its own PostgreSQL schema and its own Alembic version table. Runtime connections set their search path to only that schema, so unqualified queries cannot fall through to the other application's `public` tables.
+
+The browser publishable key and `SUPABASE_SERVICE_ROLE_KEY` are not substitutes for `HOWLIX_DATABASE_URL`. SQLAlchemy and Alembic require the database Session pooler URI from Supabase's **Connect** dialog. Never copy another application's service-role key into the Howlix frontend.
 
 ## Apply and inspect migrations
 
@@ -35,7 +42,7 @@ python -m alembic upgrade head
 python -m alembic current
 ```
 
-Alembic creates the `projects` table and its native UUID primary key. Future schema changes must be expressed as new migrations; do not edit an already-applied migration after team or production use begins.
+Alembic first creates the configured `howlix` schema, then creates its version table, `projects`, `media_assets`, `upload_sessions`, and `processing_jobs` inside that schema. It does not modify tables in `public`. Future schema changes must be expressed as new migrations; do not edit an already-applied migration after team or production use begins.
 
 ## Connection choice
 

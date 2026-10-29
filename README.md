@@ -4,7 +4,7 @@
 
 Howlix is an AI-powered video clipping product by Wolvesgang Digital. This repository contains the Milestone 2 ingestion foundation: a polished Next.js workspace, FastAPI APIs, Supabase Postgres metadata, direct browser-to-Cloudflare-R2 multipart uploads, and a local FFprobe validation worker.
 
-> This remains a single-user local development environment. It has no authentication and must not be exposed as a public multi-user service.
+> This remains a single-user environment with no application authentication. Production-domain configuration is prepared for `howlix.wolvesgang.digital`, but the dashboard and API must stay behind a private access gate until authentication and authorization are implemented.
 
 ## Repository layout
 
@@ -19,23 +19,23 @@ howlix/
 ## Prerequisites (Windows 64-bit)
 
 - Node.js 20.9 or newer and npm
-- Python 3.11
+- Python 3.11 or newer
 - Git
 - A Supabase project and its Postgres connection string
 - FFmpeg/FFprobe
 - A private Cloudflare R2 bucket named `howlix-media` and bucket-scoped S3 credentials
 
-The initial environment inspection found Node.js 24.11.1, npm 11.6.2, Python 3.12.10, and Git 2.54.0. Python 3.11 and FFmpeg/FFprobe were not found. Install them from PowerShell if needed; these commands are intentionally not run automatically:
+The verified local environment uses Node.js 24.11.1, npm 11.6.2, Python 3.12.10, Git 2.54.0, and FFmpeg/FFprobe 9.0. Install missing tools from PowerShell if needed; these commands are intentionally not run automatically:
 
 ```powershell
-winget install --id Python.Python.3.11 --exact
+winget install --id Python.Python.3.12 --exact
 winget install --id Gyan.FFmpeg --exact
 ```
 
 Open a new PowerShell window after installation, then verify:
 
 ```powershell
-py -3.11 --version
+py -3.12 --version
 ffmpeg -version
 ffprobe -version
 ```
@@ -48,7 +48,7 @@ Run all commands from the repository root unless a command changes directory.
 
 ```powershell
 cd backend
-py -3.11 -m venv .venv
+py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements-dev.txt
@@ -56,7 +56,7 @@ cd ..
 Copy-Item .env.example .env
 ```
 
-Open the Supabase dashboard, select the project, click **Connect**, choose the **Session pooler** connection for reliable IPv4 development, and place that URI in the root `.env` as `HOWLIX_DATABASE_URL`. Replace the password placeholder and retain `sslmode=require`. Password characters such as `@`, `#`, `?`, or spaces must be URL-encoded. Then add the private R2 account ID and bucket-scoped S3 credentials described in [Cloudflare R2 setup](docs/cloudflare-r2-setup.md).
+Open the Supabase dashboard, select the project, click **Connect**, choose the **Session pooler** connection for reliable IPv4 development, and place that URI in the root `.env` as `HOWLIX_DATABASE_URL`. Replace the password placeholder and retain `sslmode=require`. Password characters such as `@`, `#`, `?`, or spaces must be URL-encoded. Keep `HOWLIX_DATABASE_SCHEMA=howlix`; this isolates Howlix from other applications sharing the Supabase project. Then add credentials scoped to the separate private `howlix-media` R2 bucket as described in [Cloudflare R2 setup](docs/cloudflare-r2-setup.md).
 
 Then apply the schema:
 
@@ -167,4 +167,6 @@ Not implemented:
 Media validation runs as a background worker, but distributed job infrastructure is intentionally not introduced yet.
 
 See [the architecture](docs/architecture.md), [Cloudflare R2 setup](docs/cloudflare-r2-setup.md), [Supabase setup](docs/supabase.md), [roadmap](docs/roadmap.md), and [Milestone 2 notes](docs/milestone-2.md) for more detail.
+
+Production URL and Git-connected deployment preparation are documented in [deployment.md](docs/deployment.md). The intended layout is `https://howlix.wolvesgang.digital` for Next.js and `https://api.howlix.wolvesgang.digital` for FastAPI.
 
