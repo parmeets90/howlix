@@ -1,15 +1,29 @@
+import Image from "next/image";
 import Link from "next/link";
-import { Sparkles } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
 export function Brand({ compact = false, className }: { compact?: boolean; className?: string }) {
   return (
-    <Link href="/" className={cn("inline-flex items-center gap-3", className)} aria-label="Howlix home">
-      <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-violet-400/20 bg-violet-500/15 text-violet-300 shadow-glow">
-        <Sparkles className="h-4 w-4" aria-hidden="true" />
-      </span>
-      {!compact && <span className="text-lg font-semibold tracking-[-0.03em] text-white">Howlix</span>}
+    <Link href="/" className={cn("inline-flex items-center", className)} aria-label="Howlix home">
+      {compact ? (
+        <Image
+          src="/brand/howlix-icon-64.png"
+          alt="Howlix wolf emblem"
+          width={64}
+          height={64}
+          className="h-9 w-9 object-contain"
+        />
+      ) : (
+        <Image
+          src="/brand/howlix-logo-dark.svg"
+          alt="Howlix by Wolvesgang Digital"
+          width={920}
+          height={230}
+          className="h-auto w-[154px] sm:w-[166px]"
+          unoptimized
+        />
+      )}
     </Link>
   );
 }

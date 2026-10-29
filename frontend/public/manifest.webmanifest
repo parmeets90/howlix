@@ -1,0 +1,23 @@
+{
+  "name": "Howlix — Find the moments worth watching",
+  "short_name": "Howlix",
+  "description": "AI-powered video clipping by Wolvesgang Digital.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0F0B1D",
+  "theme_color": "#A659FF",
+  "icons": [
+    {
+      "src": "/brand/howlix-app-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/brand/howlix-app-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
