@@ -1,0 +1,2 @@
+"""Howlix backend application."""
+

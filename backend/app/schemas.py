@@ -1,0 +1,146 @@
+from __future__ import annotations
+
+from datetime import datetime
+import uuid
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.models import (
+    MediaAssetStatus,
+    ProcessingJobStatus,
+    ProjectStatus,
+    UploadSessionStatus,
+)
+
+
+class ProjectCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    description: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("title")
+    @classmethod
+    def title_must_not_be_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Title must not be blank")
+        return value
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+
+class ProjectResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    title: str
+    description: str | None
+    status: ProjectStatus
+    created_at: datetime
+    updated_at: datetime
+
+
+class UploadInitiateRequest(BaseModel):
+    original_filename: str = Field(min_length=1, max_length=500)
+    mime_type: str = Field(min_length=1, max_length=100)
+    file_size_bytes: int = Field(gt=0)
+
+
+class UploadSessionResponse(BaseModel):
+    id: uuid.UUID
+    asset_id: uuid.UUID
+    status: UploadSessionStatus
+    part_size_bytes: int
+    expected_size_bytes: int
+    total_parts: int
+    created_at: datetime
+    expires_at: datetime
+    completed_at: datetime | None
+
+
+class UploadInitiateResponse(BaseModel):
+    session: UploadSessionResponse
+
+
+class UploadPartSignRequest(BaseModel):
+    part_number: int = Field(ge=1, le=10000)
+
+
+class UploadPartSignResponse(BaseModel):
+    part_number: int
+    upload_url: str
+    expires_at: datetime
+
+
+class UploadedPartResponse(BaseModel):
+    part_number: int
+    etag: str
+    size: int
+
+
+class UploadedPartsResponse(BaseModel):
+    session_id: uuid.UUID
+    parts: list[UploadedPartResponse]
+
+
+class CompletedPartInput(BaseModel):
+    part_number: int = Field(ge=1, le=10000)
+    etag: str = Field(min_length=1, max_length=256)
+
+
+class CompleteUploadRequest(BaseModel):
+    parts: list[CompletedPartInput] = Field(min_length=1, max_length=10000)
+
+
+class UploadCompletionResponse(BaseModel):
+    session: UploadSessionResponse
+    asset_id: uuid.UUID
+    asset_status: MediaAssetStatus
+    validation_job_id: uuid.UUID | None
+
+
+class ProcessingJobSummary(BaseModel):
+    id: uuid.UUID
+    status: ProcessingJobStatus
+    attempts: int
+    max_attempts: int
+    error_message: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+
+
+class MediaAssetResponse(BaseModel):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    original_filename: str
+    mime_type: str
+    file_size_bytes: int
+    duration_seconds: float | None
+    width: int | None
+    height: int | None
+    frame_rate: float | None
+    video_codec: str | None
+    audio_codec: str | None
+    container_format: str | None
+    status: MediaAssetStatus
+    created_at: datetime
+    updated_at: datetime
+    preview_url: str | None = None
+    preview_url_expires_at: datetime | None = None
+    latest_job: ProcessingJobSummary | None = None
+
+
+class ErrorDetail(BaseModel):
+    code: str
+    message: str
+    details: object | None = None
+
+
+class ErrorResponse(BaseModel):
+    error: ErrorDetail
+

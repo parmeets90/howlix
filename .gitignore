@@ -1,0 +1,52 @@
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+*.egg-info/
+
+# Database and runtime storage
+storage/*
+!storage/.gitkeep
+tmp/
+temp/
+.tmp/
+backend/tmp/
+backend/temp/
+*.db
+*.sqlite
+*.sqlite3
+*.part
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# Generated browser and test artifacts
+output/
+.playwright-cli/
+test-results/
+playwright-report/
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
