@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.media import router as media_router
+from app.api.moments import router as moments_router
 from app.api.projects import router as projects_router
 from app.api.transcripts import router as transcripts_router
 from app.api.uploads import router as uploads_router
@@ -16,8 +17,8 @@ def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
         title="Howlix API",
-        description="Local API for Howlix projects, private media uploads, and transcription jobs.",
-        version="0.3.0",
+        description="Local API for Howlix projects, private media, transcription, and moment discovery.",
+        version="0.4.0",
         docs_url=None if settings.environment == "production" else "/docs",
         redoc_url=None if settings.environment == "production" else "/redoc",
         openapi_url=None if settings.environment == "production" else "/openapi.json",
@@ -27,7 +28,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=list(settings.cors_origins),
         allow_credentials=False,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
         allow_headers=["*"],
     )
     register_error_handlers(app)
@@ -40,6 +41,7 @@ def create_app() -> FastAPI:
     app.include_router(uploads_router, prefix="/api/v1")
     app.include_router(media_router, prefix="/api/v1")
     app.include_router(transcripts_router, prefix="/api/v1")
+    app.include_router(moments_router, prefix="/api/v1")
     return app
 
 

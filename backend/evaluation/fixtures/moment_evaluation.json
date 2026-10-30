@@ -1,0 +1,105 @@
+{
+  "dataset_version": "1.0",
+  "license": "Synthetic text created for HOWLIX automated evaluation; no third-party transcript content.",
+  "cases": [
+    {
+      "id": "en-strong-hook",
+      "language": "en",
+      "duration_ms": 65000,
+      "segments": [
+        [0, 10000, "What if the productivity advice everyone repeats is backwards?"],
+        [10500, 30000, "I tested shorter task lists for a month and finished more meaningful work with less stress."],
+        [30500, 52000, "The useful rule is simple: choose one outcome, finish it, then add the next task."],
+        [52500, 64000, "The payoff is focus, not a busier calendar."]
+      ],
+      "good_windows": [[0, 64000]]
+    },
+    {
+      "id": "en-weak-hook",
+      "language": "en",
+      "duration_ms": 70000,
+      "segments": [
+        [0, 18000, "Today I am going to discuss several general things about my week."],
+        [18500, 39000, "There were meetings, messages, and a few ordinary errands to complete."],
+        [39500, 68000, "That is most of what happened, and there is no particular conclusion."]
+      ],
+      "good_windows": []
+    },
+    {
+      "id": "en-incomplete-story",
+      "language": "en",
+      "duration_ms": 50000,
+      "segments": [
+        [0, 15000, "I opened the letter and could not believe the first sentence."],
+        [15500, 34000, "Before I explain what it said, you need five minutes of family history."],
+        [34500, 49000, "We will reveal the answer in the next episode."]
+      ],
+      "good_windows": []
+    },
+    {
+      "id": "en-multiple-moments",
+      "language": "en",
+      "duration_ms": 150000,
+      "segments": [
+        [0, 18000, "Why do most budgets fail in the first week? They track guilt instead of decisions."],
+        [18500, 42000, "Give every recurring expense one clear rule, and review exceptions once a month."],
+        [42500, 60000, "That turns a budget into a calm system instead of a daily argument."],
+        [70000, 88000, "A good question can change a difficult conversation: what would a fair outcome look like?"],
+        [88500, 114000, "It moves both people away from blame and toward a result they can describe."],
+        [114500, 140000, "You may still disagree, but now the disagreement has a useful shape and a possible next step."]
+      ],
+      "good_windows": [[0, 60000], [70000, 140000]]
+    },
+    {
+      "id": "en-repeated-topic",
+      "language": "en",
+      "duration_ms": 130000,
+      "segments": [
+        [0, 26000, "Sleep matters because memory consolidation happens while the brain is resting."],
+        [26500, 52000, "A consistent bedtime improves recall more than one late night of extra study."],
+        [53000, 78000, "To repeat the same point, sleep helps memory consolidate during rest."],
+        [78500, 104000, "Again, the best study trick is often a consistent bedtime."],
+        [104500, 128000, "The repeated takeaway is to protect sleep before an important test."]
+      ],
+      "good_windows": [[0, 52000]]
+    },
+    {
+      "id": "en-long-pause",
+      "language": "en",
+      "duration_ms": 110000,
+      "segments": [
+        [0, 24000, "Here is a practical way to decide whether an opportunity is worth your time."],
+        [24500, 44000, "Write down what you must stop doing if you say yes."],
+        [70000, 88000, "That long pause separates the setup from the final test."],
+        [88500, 108000, "If the trade is unclear, the opportunity is not yet a real decision."]
+      ],
+      "good_windows": [[0, 44000], [70000, 108000]]
+    },
+    {
+      "id": "hi-punjabi-standalone",
+      "language": "hi",
+      "duration_ms": 80000,
+      "segments": [
+        [0, 18000, "क्या मेहनत का मतलब हमेशा ज़्यादा घंटे काम करना है? बिल्कुल नहीं।"],
+        [18500, 42000, "सही दिशा में छोटा कदम, गलत दिशा में लंबी दौड़ से बेहतर होता है।"],
+        [42500, 62000, "पंजाबी में कहते हैं, हौली चलो पर सही राह ते चलो।"],
+        [62500, 79000, "सीख यह है कि गति से पहले दिशा चुनिए।"]
+      ],
+      "good_windows": [[0, 79000]]
+    },
+    {
+      "id": "very-short",
+      "language": "en",
+      "duration_ms": 12000,
+      "segments": [[0, 11000, "This transcript is too short to form a twenty second clip."]],
+      "good_windows": []
+    },
+    {
+      "id": "no-usable-silence",
+      "language": "en",
+      "duration_ms": 90000,
+      "segments": [],
+      "good_windows": []
+    }
+  ]
+}

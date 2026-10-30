@@ -106,8 +106,59 @@ class Settings(BaseSettings):
     transcription_retry_base_seconds: int = Field(
         default=5, ge=0, le=300, validation_alias="TRANSCRIPTION_RETRY_BASE_SECONDS"
     )
+    moment_analysis_provider: Literal["groq", "fixture"] = Field(
+        default="groq", validation_alias="MOMENT_ANALYSIS_PROVIDER"
+    )
+    groq_moment_model: str = Field(
+        default="openai/gpt-oss-20b", validation_alias="GROQ_MOMENT_MODEL"
+    )
+    moment_min_duration_seconds: int = Field(
+        default=20, ge=5, le=90, validation_alias="MOMENT_MIN_DURATION_SECONDS"
+    )
+    moment_max_duration_seconds: int = Field(
+        default=90, ge=20, le=180, validation_alias="MOMENT_MAX_DURATION_SECONDS"
+    )
+    moment_target_duration_seconds: int = Field(
+        default=55, ge=10, le=120, validation_alias="MOMENT_TARGET_DURATION_SECONDS"
+    )
+    moment_max_candidates: int = Field(
+        default=24, ge=1, le=100, validation_alias="MOMENT_MAX_CANDIDATES"
+    )
+    moment_max_recommendations: int = Field(
+        default=10, ge=1, le=20, validation_alias="MOMENT_MAX_RECOMMENDATIONS"
+    )
+    moment_min_editorial_score: float = Field(
+        default=55.0, ge=0, le=100, validation_alias="MOMENT_MIN_EDITORIAL_SCORE"
+    )
+    moment_max_input_chars: int = Field(
+        default=80_000, ge=1000, le=500_000, validation_alias="MOMENT_MAX_INPUT_CHARS"
+    )
+    moment_batch_size: int = Field(
+        default=12, ge=1, le=30, validation_alias="MOMENT_BATCH_SIZE"
+    )
+    moment_max_api_requests: int = Field(
+        default=3, ge=1, le=10, validation_alias="MOMENT_MAX_API_REQUESTS"
+    )
+    moment_max_output_tokens: int = Field(
+        default=6000, ge=500, le=16000, validation_alias="MOMENT_MAX_OUTPUT_TOKENS"
+    )
+    moment_api_max_retries: int = Field(
+        default=3, ge=0, le=6, validation_alias="MOMENT_API_MAX_RETRIES"
+    )
+    moment_retry_base_seconds: int = Field(
+        default=5, ge=0, le=300, validation_alias="MOMENT_RETRY_BASE_SECONDS"
+    )
+    moment_analysis_version: str = Field(
+        default="1.0", min_length=1, max_length=32, validation_alias="MOMENT_ANALYSIS_VERSION"
+    )
+    moment_prompt_version: str = Field(
+        default="m4-v1", min_length=1, max_length=32, validation_alias="MOMENT_PROMPT_VERSION"
+    )
     run_groq_integration_tests: bool = Field(
         default=False, validation_alias="RUN_GROQ_INTEGRATION_TESTS"
+    )
+    run_moment_groq_integration_tests: bool = Field(
+        default=False, validation_alias="RUN_MOMENT_GROQ_INTEGRATION_TESTS"
     )
     groq_integration_audio_path: Path | None = Field(
         default=None, validation_alias="GROQ_INTEGRATION_AUDIO_PATH"
@@ -150,6 +201,14 @@ class Settings(BaseSettings):
             self.r2_endpoint_url = f"https://{self.r2_account_id}.r2.cloudflarestorage.com"
         if self.transcription_chunk_overlap_seconds >= self.transcription_chunk_seconds:
             raise ValueError("Transcription chunk overlap must be shorter than each chunk.")
+        if self.moment_min_duration_seconds > self.moment_target_duration_seconds:
+            raise ValueError("Moment target duration must be at least the minimum duration.")
+        if self.moment_target_duration_seconds > self.moment_max_duration_seconds:
+            raise ValueError("Moment target duration must not exceed the maximum duration.")
+        if self.moment_max_recommendations > self.moment_max_candidates:
+            raise ValueError("Moment recommendations cannot exceed generated candidates.")
+        if self.moment_batch_size * self.moment_max_api_requests < self.moment_max_candidates:
+            raise ValueError("Moment API batch capacity must cover the configured candidate limit.")
         return self
 
     @property

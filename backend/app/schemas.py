@@ -7,6 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models import (
     MediaAssetStatus,
+    MomentAnalysisStatus,
+    MomentReviewStatus,
     ProcessingJobStatus,
     ProjectStatus,
     TranscriptStatus,
@@ -174,6 +176,74 @@ class TranscriptionStatusResponse(BaseModel):
     transcript_id: uuid.UUID | None
     transcript_status: TranscriptStatus | None
     job: ProcessingJobSummary | None
+
+
+class MomentAnalysisResponse(BaseModel):
+    id: uuid.UUID
+    asset_id: uuid.UUID
+    transcript_id: uuid.UUID
+    status: MomentAnalysisStatus
+    provider: str
+    model: str
+    prompt_version: str
+    analysis_version: str
+    settings: dict
+    usage: dict | None
+    error_message: str | None
+    recommendation_count: int
+    job: ProcessingJobSummary | None
+    created_at: datetime
+    completed_at: datetime | None
+
+
+class MomentCandidateResponse(BaseModel):
+    id: uuid.UUID
+    analysis_run_id: uuid.UUID
+    asset_id: uuid.UUID
+    start_ms: int
+    end_ms: int
+    ai_start_ms: int
+    ai_end_ms: int
+    duration_ms: int
+    suggested_title: str
+    hook_text: str
+    topic: str
+    category: str
+    overall_score: float
+    score_breakdown: dict
+    explanation: str
+    confidence_notes: str
+    needs_context: bool
+    rank: int
+    review_status: MomentReviewStatus
+    transcript_excerpt: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class MomentUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    suggested_title: str | None = Field(default=None, min_length=1, max_length=200)
+    start_ms: int | None = Field(default=None, ge=0)
+    end_ms: int | None = Field(default=None, gt=0)
+    reset_boundaries: bool = False
+
+    @field_validator("suggested_title")
+    @classmethod
+    def normalize_moment_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("Suggested title must not be blank")
+        return value
+
+
+class MomentReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    review_status: MomentReviewStatus
 
 
 class ErrorDetail(BaseModel):

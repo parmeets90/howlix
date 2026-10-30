@@ -10,13 +10,16 @@ from pathlib import Path
 from threading import Event, Thread
 
 from sqlalchemy import delete, or_, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app.config import Settings, get_settings
 from app.database import SessionLocal
 from app.models import (
     MediaAsset,
     MediaAssetStatus,
+    MomentAnalysisRun,
+    MomentAnalysisStatus,
+    MomentCandidate,
     ProcessingJob,
     ProcessingJobStatus,
     ProcessingJobType,
@@ -33,6 +36,20 @@ from app.services.media_probe import (
     MediaProbeResult,
     MediaValidationError,
     probe_media,
+)
+from app.services.moment_discovery import (
+    MomentAnalyzer,
+    PermanentMomentAnalysisError,
+    SegmentData,
+    TransientMomentAnalysisError,
+    WordData,
+    bounded_batches,
+    deduplicate_ranked,
+    generate_candidate_windows,
+    get_moment_analyzer,
+    merge_usage,
+    refine_boundaries,
+    score_breakdown,
 )
 from app.services.storage import StorageError, StorageService, get_storage_service
 from app.services.audio_preprocessing import AudioPreprocessingError, extract_audio_chunks
@@ -76,6 +93,16 @@ def claim_next_job(
                 )
                 if transcript is not None:
                     transcript.status = TranscriptStatus.FAILED
+            elif job.job_type == ProcessingJobType.MOMENT_DISCOVERY:
+                run = db.scalar(
+                    select(MomentAnalysisRun)
+                    .where(MomentAnalysisRun.asset_id == job.asset_id)
+                    .order_by(MomentAnalysisRun.created_at.desc())
+                    .limit(1)
+                )
+                if run is not None:
+                    run.status = MomentAnalysisStatus.FAILED
+                    run.error_message = job.error_message
 
         statement = (
             select(ProcessingJob)
@@ -160,6 +187,7 @@ class MediaValidationWorker:
         session_factory: sessionmaker[Session] = SessionLocal,
         probe: ProbeFunction = probe_media,
         transcription_provider: TranscriptionProvider | None = None,
+        moment_analyzer: MomentAnalyzer | None = None,
         audio_extractor=extract_audio_chunks,
         worker_id: str | None = None,
     ) -> None:
@@ -168,6 +196,7 @@ class MediaValidationWorker:
         self.session_factory = session_factory
         self.probe = probe
         self.transcription_provider = transcription_provider
+        self.moment_analyzer = moment_analyzer
         self.audio_extractor = audio_extractor
         self.worker_id = worker_id or f"worker-{uuid.uuid4().hex[:12]}"
 
@@ -213,6 +242,8 @@ class MediaValidationWorker:
             job_type = job.job_type if job else None
         if job_type == ProcessingJobType.TRANSCRIBE_MEDIA:
             self._process_transcription_job(job_id)
+        elif job_type == ProcessingJobType.MOMENT_DISCOVERY:
+            self._process_moment_discovery_job(job_id)
         else:
             self._process_validation_job(job_id)
         return True
@@ -553,6 +584,238 @@ class MediaValidationWorker:
             job.lease_expires_at = None
             if transcript is not None:
                 transcript.status = TranscriptStatus.FAILED
+        db.commit()
+
+    def _process_moment_discovery_job(self, job_id: uuid.UUID) -> None:
+        with self.session_factory() as db:
+            job = db.get(ProcessingJob, job_id)
+            if job is None or job.claimed_by != self.worker_id:
+                return
+            run = db.scalar(
+                select(MomentAnalysisRun)
+                .where(MomentAnalysisRun.asset_id == job.asset_id)
+                .order_by(MomentAnalysisRun.created_at.desc())
+                .limit(1)
+            )
+            asset = db.get(MediaAsset, job.asset_id)
+            transcript = (
+                db.scalar(
+                    select(Transcript)
+                    .where(Transcript.id == run.transcript_id)
+                    .options(
+                        selectinload(Transcript.segments),
+                        selectinload(Transcript.words),
+                    )
+                )
+                if run is not None
+                else None
+            )
+            if (
+                run is None
+                or asset is None
+                or transcript is None
+                or transcript.status != TranscriptStatus.COMPLETED
+                or asset.duration_seconds is None
+            ):
+                self._finish_moment_failure(
+                    db,
+                    job,
+                    run,
+                    "Completed transcript and source duration are required for moment discovery.",
+                    retryable=False,
+                )
+                return
+            run.status = MomentAnalysisStatus.PROCESSING
+            run.error_message = None
+            job.progress_stage = "generating_candidates"
+            job.progress_completed = None
+            job.progress_total = None
+            db.commit()
+            run_id = run.id
+            asset_id = asset.id
+            language = transcript.language
+            source_duration_ms = max(1, round(asset.duration_seconds * 1000))
+            segments = [
+                SegmentData(item.start_ms, item.end_ms, item.text)
+                for item in transcript.segments
+            ]
+            words = [WordData(item.start_ms, item.end_ms, item.word) for item in transcript.words]
+
+        minimum_ms = self.settings.moment_min_duration_seconds * 1000
+        maximum_ms = self.settings.moment_max_duration_seconds * 1000
+        target_ms = self.settings.moment_target_duration_seconds * 1000
+        try:
+            with LeaseHeartbeat(
+                self.session_factory,
+                job_id,
+                self.worker_id,
+                self.settings.job_lease_seconds,
+            ):
+                windows = generate_candidate_windows(
+                    segments,
+                    source_duration_ms=source_duration_ms,
+                    min_duration_ms=minimum_ms,
+                    max_duration_ms=maximum_ms,
+                    target_duration_ms=target_ms,
+                    max_candidates=self.settings.moment_max_candidates,
+                )
+                batches = bounded_batches(
+                    windows,
+                    batch_size=self.settings.moment_batch_size,
+                    max_requests=self.settings.moment_max_api_requests,
+                    max_input_chars=self.settings.moment_max_input_chars,
+                )
+                analyzer = self.moment_analyzer or get_moment_analyzer(self.settings)
+                evaluations = {}
+                usage: dict[str, int] | None = None
+                for index, batch in enumerate(batches):
+                    self._set_progress(job_id, "evaluating_candidates", index, len(batches))
+                    result = analyzer.analyze(
+                        batch,
+                        language=language,
+                        source_duration_ms=source_duration_ms,
+                    )
+                    usage = merge_usage(usage, result.usage)
+                    evaluations.update(
+                        {evaluation.candidate_id: evaluation for evaluation in result.evaluations}
+                    )
+                    self._set_progress(job_id, "evaluating_candidates", index + 1, len(batches))
+
+                scored = []
+                for window in windows:
+                    evaluation = evaluations.get(window.candidate_id)
+                    if evaluation is None:
+                        continue
+                    overall, breakdown = score_breakdown(evaluation.scores)
+                    scored.append((window, evaluation, overall, breakdown))
+                recommendations = deduplicate_ranked(
+                    scored,
+                    limit=self.settings.moment_max_recommendations,
+                    minimum_score=self.settings.moment_min_editorial_score,
+                )
+                self._set_progress(
+                    job_id,
+                    "refining_boundaries",
+                    0,
+                    len(recommendations),
+                )
+                refined = []
+                for index, item in enumerate(recommendations):
+                    window, evaluation, overall, breakdown = item
+                    start_ms, end_ms = refine_boundaries(
+                        window,
+                        words,
+                        source_duration_ms=source_duration_ms,
+                        min_duration_ms=minimum_ms,
+                        max_duration_ms=maximum_ms,
+                    )
+                    refined.append(
+                        (start_ms, end_ms, window, evaluation, overall, breakdown)
+                    )
+                    self._set_progress(
+                        job_id,
+                        "refining_boundaries",
+                        index + 1,
+                        len(recommendations),
+                    )
+
+            with self.session_factory() as db:
+                job = db.get(ProcessingJob, job_id)
+                run = db.get(MomentAnalysisRun, run_id)
+                if job is None or run is None or job.claimed_by != self.worker_id:
+                    return
+                db.execute(
+                    delete(MomentCandidate).where(MomentCandidate.analysis_run_id == run.id)
+                )
+                for rank, item in enumerate(refined, start=1):
+                    start_ms, end_ms, _window, evaluation, overall, breakdown = item
+                    db.add(
+                        MomentCandidate(
+                            analysis_run_id=run.id,
+                            asset_id=asset_id,
+                            start_ms=start_ms,
+                            end_ms=end_ms,
+                            ai_start_ms=start_ms,
+                            ai_end_ms=end_ms,
+                            suggested_title=evaluation.suggested_title,
+                            hook_text=evaluation.hook_text,
+                            topic=evaluation.topic,
+                            category=evaluation.category,
+                            overall_score=overall,
+                            score_breakdown_json=breakdown,
+                            explanation=evaluation.explanation,
+                            confidence_notes=evaluation.confidence_notes,
+                            needs_context=evaluation.needs_context,
+                            rank=rank,
+                        )
+                    )
+                run.status = MomentAnalysisStatus.COMPLETED
+                run.usage_json = usage
+                run.error_message = None
+                run.completed_at = utc_now()
+                self._mark_job_succeeded(job)
+                job.progress_completed = len(refined)
+                job.progress_total = len(refined)
+                db.commit()
+        except PermanentMomentAnalysisError as exc:
+            with self.session_factory() as db:
+                job = db.get(ProcessingJob, job_id)
+                run = db.get(MomentAnalysisRun, run_id)
+                if job is not None:
+                    self._finish_moment_failure(db, job, run, str(exc), retryable=False)
+        except TransientMomentAnalysisError as exc:
+            with self.session_factory() as db:
+                job = db.get(ProcessingJob, job_id)
+                run = db.get(MomentAnalysisRun, run_id)
+                if job is not None:
+                    self._finish_moment_failure(db, job, run, str(exc), retryable=True)
+        except Exception as exc:
+            logger.exception("Unexpected moment discovery failure for job %s", job_id)
+            with self.session_factory() as db:
+                job = db.get(ProcessingJob, job_id)
+                run = db.get(MomentAnalysisRun, run_id)
+                if job is not None:
+                    self._finish_moment_failure(
+                        db,
+                        job,
+                        run,
+                        f"Unexpected moment discovery failure: {type(exc).__name__}",
+                        retryable=True,
+                    )
+
+    def _finish_moment_failure(
+        self,
+        db: Session,
+        job: ProcessingJob,
+        run: MomentAnalysisRun | None,
+        message: str,
+        *,
+        retryable: bool,
+    ) -> None:
+        job.error_message = message[:2000]
+        job.claimed_by = None
+        if retryable and job.attempts < job.max_attempts:
+            job.status = ProcessingJobStatus.RETRY
+            job.progress_stage = "retry"
+            job.lease_expires_at = utc_now() + timedelta(
+                seconds=min(
+                    300,
+                    self.settings.moment_retry_base_seconds
+                    * (2 ** max(0, job.attempts - 1)),
+                )
+            )
+            if run is not None:
+                run.status = MomentAnalysisStatus.RETRY
+                run.error_message = message[:2000]
+        else:
+            job.status = ProcessingJobStatus.FAILED
+            job.progress_stage = "failed"
+            job.finished_at = utc_now()
+            job.lease_expires_at = None
+            if run is not None:
+                run.status = MomentAnalysisStatus.FAILED
+                run.error_message = message[:2000]
+                run.completed_at = utc_now()
         db.commit()
 
 

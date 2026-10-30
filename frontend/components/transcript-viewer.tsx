@@ -13,6 +13,7 @@ import {
   type TranscriptionStatus,
 } from "../lib/api";
 import { filterTranscriptSegments } from "../lib/transcript";
+import { MomentDiscovery } from "./moment-discovery";
 
 
 function timestamp(milliseconds: number): string {
@@ -143,6 +144,7 @@ export function TranscriptViewer({ assetId, videoElementId }: { assetId: string;
           </div>
         </div>
       )}
+      {transcript && <MomentDiscovery assetId={assetId} videoElementId={videoElementId} />}
     </div>
   );
 }

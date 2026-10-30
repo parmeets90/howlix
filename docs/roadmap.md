@@ -34,6 +34,8 @@ Status: implemented in this repository.
 
 ## Milestone 4 — Moment discovery
 
+Status: implemented in this repository.
+
 - Structured hook and moment analysis
 - Transparent editorial score factors
 - Candidate clip review and manual boundary adjustment

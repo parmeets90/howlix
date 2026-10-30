@@ -2,7 +2,7 @@
 
 **Find the moments worth watching.**
 
-Howlix is an AI-powered video clipping product by Wolvesgang Digital. This repository contains the verified ingestion pipeline and Milestone 3 transcription foundation: a polished Next.js workspace, FastAPI APIs, Supabase Postgres metadata, direct browser-to-Cloudflare-R2 multipart uploads, FFprobe validation, and retryable word-timestamp transcription.
+Howlix is an AI-powered video clipping product by Wolvesgang Digital. This repository contains the verified ingestion, transcription, and Milestone 4 moment-discovery pipeline: a polished Next.js workspace, FastAPI APIs, Supabase Postgres metadata, direct browser-to-Cloudflare-R2 multipart uploads, FFprobe validation, retryable word-timestamp transcription, and transparent AI clip recommendations.
 
 > This remains a single-user environment with no application authentication. Production-domain configuration is prepared for `howlix.wolvesgang.digital`, but the dashboard and API must stay behind a private access gate until authentication and authorization are implemented.
 
@@ -58,7 +58,7 @@ Copy-Item .env.example .env
 
 Open the Supabase dashboard, select the project, click **Connect**, choose the **Session pooler** connection for reliable IPv4 development, and place that URI in the root `.env` as `HOWLIX_DATABASE_URL`. Replace the password placeholder and retain `sslmode=require`. Password characters such as `@`, `#`, `?`, or spaces must be URL-encoded. Keep `HOWLIX_DATABASE_SCHEMA=howlix`; this isolates Howlix from other applications sharing the Supabase project. Then add credentials scoped to the separate private `howlix-media` R2 bucket as described in [Cloudflare R2 setup](docs/cloudflare-r2-setup.md).
 
-For cloud transcription, create a Groq API key and set `GROQ_API_KEY` in the root `.env`. It is read only by FastAPI and the worker. `TRANSCRIPTION_PROVIDER=groq` and `GROQ_TRANSCRIPTION_MODEL=whisper-large-v3-turbo` are the defaults. Never place the key in a `NEXT_PUBLIC_*` variable.
+For cloud transcription and moment analysis, create a Groq API key and set `GROQ_API_KEY` in the root `.env`. It is read only by FastAPI and the worker. `TRANSCRIPTION_PROVIDER=groq`, `GROQ_TRANSCRIPTION_MODEL=whisper-large-v3-turbo`, and `GROQ_MOMENT_MODEL=openai/gpt-oss-20b` are the defaults. Never place the key in a `NEXT_PUBLIC_*` variable. Moment analysis sends timestamped transcript excerpts and metadata, never video bytes.
 
 Then apply the schema:
 
@@ -105,7 +105,7 @@ cd frontend
 npm run dev
 ```
 
-Validation and transcription worker:
+Validation, transcription, and moment-discovery worker:
 
 ```powershell
 cd backend
@@ -154,6 +154,23 @@ cd backend
 python -m pytest -m integration tests\test_groq_integration.py
 ```
 
+The separate paid live moment-analysis check is also opt-in:
+
+```powershell
+$env:RUN_MOMENT_GROQ_INTEGRATION_TESTS="true"
+cd backend
+.\.venv\Scripts\Activate.ps1
+python -m pytest -m integration tests\test_moment_groq_integration.py
+```
+
+Run the offline, version-controlled recommendation evaluation with:
+
+```powershell
+cd backend
+.\.venv\Scripts\Activate.ps1
+python evaluation\run_moment_evaluation.py
+```
+
 ## Implemented scope
 
 Implemented:
@@ -173,16 +190,21 @@ Implemented:
 - FFmpeg speech-audio extraction and overlapping chunk processing
 - Persisted transcripts, segments, words, language, real stages, and retries
 - Searchable timestamped transcript viewer with video seeking
+- Deterministic 20–90 second transcript candidate generation and word-level boundary refinement
+- Provider-neutral Groq/fixture moment analysis with validated structured JSON
+- Deterministic, normalized editorial scoring with visual quality marked unassessed
+- Ranked, deduplicated, topic-diverse recommendations with durable retries and reproducibility metadata
+- Moment review UI with preview-range playback, title/boundary edits, reset, approve, and reject actions
+- Synthetic multilingual evaluation corpus and deterministic quality metrics
 
 Not implemented:
 
-- Hook detection, moment scoring, or automatic clip selection
 - Clip generation, cropping, caption rendering, or exports
 - Authentication, billing, or public deployment
 
 Media validation runs as a background worker, but distributed job infrastructure is intentionally not introduced yet.
 
-See [the architecture](docs/architecture.md), [Cloudflare R2 setup](docs/cloudflare-r2-setup.md), [Supabase setup](docs/supabase.md), [roadmap](docs/roadmap.md), [Milestone 2 notes](docs/milestone-2.md), and [Milestone 3 notes](docs/milestone-3.md) for more detail.
+See [the architecture](docs/architecture.md), [Cloudflare R2 setup](docs/cloudflare-r2-setup.md), [Supabase setup](docs/supabase.md), [roadmap](docs/roadmap.md), [Milestone 3 notes](docs/milestone-3.md), and [Milestone 4 notes](docs/milestone-4.md) for more detail.
 
 Production URL and Git-connected deployment preparation are documented in [deployment.md](docs/deployment.md). The intended layout is `https://howlix.wolvesgang.digital` for Next.js and `https://api.howlix.wolvesgang.digital` for FastAPI.
 
