@@ -25,12 +25,11 @@ function timestamp(milliseconds: number): string {
 
 function progressLabel(status: TranscriptionStatus): string {
   const job = status.job;
-  if (!job) return "Preparing transcription";
-  const stage = job.progress_stage?.replaceAll("_", " ") ?? job.status;
+  if (!job) return "Getting ready to listen";
   if (job.progress_completed !== null && job.progress_total !== null) {
-    return `${stage} · ${job.progress_completed} of ${job.progress_total}`;
+    return `Listening to your video · ${job.progress_completed} of ${job.progress_total}`;
   }
-  return stage;
+  return "Listening to your video";
 }
 
 export function TranscriptViewer({ assetId, videoElementId }: { assetId: string; videoElementId: string }) {
@@ -107,7 +106,7 @@ export function TranscriptViewer({ assetId, videoElementId }: { assetId: string;
   }
 
   if (loading) {
-    return <div className="mt-6 flex items-center gap-2 text-xs text-zinc-500"><LoaderCircle className="h-3.5 w-3.5 animate-spin" /> Loading transcript status</div>;
+    return <div className="mt-6 flex items-center gap-2 text-xs text-zinc-500"><LoaderCircle className="h-3.5 w-3.5 animate-spin" /> Checking your video</div>;
   }
 
   const active = status && ["queued", "processing", "retry"].includes(status.transcript_status ?? "");
@@ -117,13 +116,13 @@ export function TranscriptViewer({ assetId, videoElementId }: { assetId: string;
     <div className="mt-6 border-t border-white/[0.06] pt-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="flex items-center gap-2 text-sm font-medium text-zinc-200"><FileText className="h-4 w-4 text-violet-300" /> Transcript</p>
-          <p className="mt-1 text-xs text-zinc-600">Original language with segment and word timestamps.</p>
+          <p className="flex items-center gap-2 text-sm font-medium text-zinc-200"><FileText className="h-4 w-4 text-violet-300" /> Words from your video</p>
+          <p className="mt-1 text-xs text-zinc-600">Turn the speech into words you can read and search.</p>
         </div>
         {!transcript && !active && (
           <Button type="button" size="sm" variant={failed ? "secondary" : "default"} onClick={() => void start()} disabled={submitting}>
             {submitting ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : failed ? <RefreshCw className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
-            {failed ? "Retry transcription" : "Transcribe video"}
+            {failed ? "Try again" : "Get the words"}
           </Button>
         )}
       </div>
@@ -138,15 +137,15 @@ export function TranscriptViewer({ assetId, videoElementId }: { assetId: string;
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {error ?? status?.job?.error_message ?? status?.job?.dispatch_error_message}
         </div>
       )}
-      {active && status?.job?.dispatch_error_message && <Button className="mt-3" type="button" size="sm" variant="secondary" onClick={() => void retryRunner()} disabled={submitting}><RefreshCw className="h-3.5 w-3.5" /> Retry runner</Button>}
+      {active && status?.job?.dispatch_error_message && <Button className="mt-3" type="button" size="sm" variant="secondary" onClick={() => void retryRunner()} disabled={submitting}><RefreshCw className="h-3.5 w-3.5" /> Try again</Button>}
 
       {transcript && (
         <div className="mt-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-xs text-zinc-500">{transcript.language?.toUpperCase() ?? "Language auto-detected"} · {transcript.provider} / {transcript.model}</p>
+            <p className="text-xs text-zinc-500">{transcript.language?.toUpperCase() ?? "Language found automatically"}</p>
             <div className="relative sm:w-64">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-600" />
-              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search transcript" className="h-9 pl-9 text-xs" />
+              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search these words" className="h-9 pl-9 text-xs" />
             </div>
           </div>
           <div className="mt-4 max-h-80 space-y-1 overflow-y-auto rounded-xl border border-white/[0.06] bg-black/20 p-2">
@@ -156,7 +155,7 @@ export function TranscriptViewer({ assetId, videoElementId }: { assetId: string;
                 <span className="text-sm leading-6 text-zinc-300">{segment.text}</span>
               </button>
             ))}
-            {visibleSegments.length === 0 && <p className="px-3 py-8 text-center text-xs text-zinc-600">No transcript segments match this search.</p>}
+            {visibleSegments.length === 0 && <p className="px-3 py-8 text-center text-xs text-zinc-600">No words match your search.</p>}
           </div>
         </div>
       )}

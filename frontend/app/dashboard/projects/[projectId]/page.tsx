@@ -58,7 +58,7 @@ function MediaStatus({ status }: { status: MediaAssetStatus }) {
       )}
     >
       {active ? <LoaderCircle className="h-3 w-3 animate-spin" /> : ready ? <CheckCircle2 className="h-3 w-3" /> : <AlertCircle className="h-3 w-3" />}
-      {status.replaceAll("_", " ")}
+      {ready ? "Ready" : active ? "Getting ready" : "Needs help"}
     </span>
   );
 }
@@ -129,33 +129,30 @@ export default function ProjectDetailPage() {
         <>
           <div className="mt-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div><p className="text-sm font-medium text-violet-300">Project</p><h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-white sm:text-4xl">{project.title}</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-500">{project.description ?? "No project description."}</p></div>
-            <div className="flex items-center gap-2 text-xs text-zinc-600"><ShieldCheck className="h-4 w-4 text-violet-300" /> Private R2 media</div>
+            <div className="flex items-center gap-2 text-xs text-zinc-600"><ShieldCheck className="h-4 w-4 text-violet-300" /> Only you can see this</div>
           </div>
 
           <section className="mt-10" aria-labelledby="media-heading">
-            <div className="flex items-center justify-between"><h2 id="media-heading" className="text-sm font-medium text-zinc-300">Media</h2><span className="text-xs text-zinc-600">{media.length} {media.length === 1 ? "video" : "videos"}</span></div>
+            <div className="flex items-center justify-between"><h2 id="media-heading" className="text-sm font-medium text-zinc-300">Your videos</h2><span className="text-xs text-zinc-600">{media.length} {media.length === 1 ? "video" : "videos"}</span></div>
             {media.length === 0 ? (
-              <div className="mt-4 rounded-2xl border border-dashed border-white/10 bg-white/[0.018] px-6 py-12 text-center"><FileVideo className="mx-auto h-6 w-6 text-violet-300" /><p className="mt-4 text-sm font-medium text-zinc-200">No videos uploaded</p><p className="mt-2 text-xs text-zinc-600">Choose a video below to start a private multipart upload.</p></div>
+              <div className="mt-4 rounded-2xl border border-dashed border-white/10 bg-white/[0.018] px-6 py-12 text-center"><FileVideo className="mx-auto h-6 w-6 text-violet-300" /><p className="mt-4 text-sm font-medium text-zinc-200">No video yet</p><p className="mt-2 text-xs text-zinc-600">Choose a video below to get started.</p></div>
             ) : (
               <div className="mt-4 space-y-4">
                 {media.map((asset) => (
                   <Card key={asset.id}>
                     <CardContent className="grid gap-6 p-5 lg:grid-cols-[1fr_1.2fr]">
                       <div className="flex min-h-48 items-center justify-center overflow-hidden rounded-xl border border-white/[0.06] bg-black/30">
-                        {asset.preview_url ? <video id={`video-${asset.id}`} controls preload="metadata" src={asset.preview_url} className="h-full max-h-80 w-full bg-black object-contain" /> : <div className="text-center"><FileVideo className="mx-auto h-7 w-7 text-zinc-700" /><p className="mt-3 text-xs text-zinc-600">Preview available after validation</p></div>}
+                        {asset.preview_url ? <video id={`video-${asset.id}`} controls preload="metadata" src={asset.preview_url} className="h-full max-h-80 w-full bg-black object-contain" /> : <div className="text-center"><FileVideo className="mx-auto h-7 w-7 text-zinc-700" /><p className="mt-3 text-xs text-zinc-600">Your video will appear here when it is ready</p></div>}
                       </div>
                       <div>
                         <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-medium text-white">{asset.original_filename}</h3><p className="mt-1 text-xs text-zinc-600">Uploaded {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(asset.created_at))}</p></div><MediaStatus status={asset.status} /></div>
                         <dl className="mt-6 grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
                           <div><dt className="text-xs text-zinc-600">File size</dt><dd className="mt-1 text-zinc-300">{formatFileSize(asset.file_size_bytes)}</dd></div>
-                          <div><dt className="text-xs text-zinc-600">Duration</dt><dd className="mt-1 text-zinc-300">{formatDuration(asset.duration_seconds)}</dd></div>
-                          <div><dt className="text-xs text-zinc-600">Resolution</dt><dd className="mt-1 text-zinc-300">{asset.width && asset.height ? `${asset.width} × ${asset.height}` : "—"}</dd></div>
-                          <div><dt className="text-xs text-zinc-600">Video</dt><dd className="mt-1 uppercase text-zinc-300">{asset.video_codec ?? "—"}</dd></div>
-                          <div><dt className="text-xs text-zinc-600">Audio</dt><dd className="mt-1 uppercase text-zinc-300">{asset.audio_codec ?? "—"}</dd></div>
-                          <div><dt className="text-xs text-zinc-600">Frame rate</dt><dd className="mt-1 text-zinc-300">{asset.frame_rate ? `${asset.frame_rate} fps` : "—"}</dd></div>
+                          <div><dt className="text-xs text-zinc-600">Length</dt><dd className="mt-1 text-zinc-300">{formatDuration(asset.duration_seconds)}</dd></div>
+                          <div><dt className="text-xs text-zinc-600">Picture size</dt><dd className="mt-1 text-zinc-300">{asset.width && asset.height ? `${asset.width} × ${asset.height}` : "—"}</dd></div>
                         </dl>
                         {asset.latest_job?.error_message && <div className="mt-5 flex gap-2 rounded-lg border border-red-400/15 bg-red-400/[0.04] p-3 text-xs leading-5 text-red-200"><AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {asset.latest_job.error_message}</div>}
-                        {ACTIVE_STATUSES.has(asset.status) && <p className="mt-5 flex items-center gap-2 text-xs text-zinc-500"><Clock3 className="h-3.5 w-3.5" /> The local worker validates this media outside the API request.</p>}
+                        {ACTIVE_STATUSES.has(asset.status) && <p className="mt-5 flex items-center gap-2 text-xs text-zinc-500"><Clock3 className="h-3.5 w-3.5" /> Howlix is getting your video ready. You can leave this page.</p>}
                         {asset.status === "ready" && <TranscriptViewer assetId={asset.id} videoElementId={`video-${asset.id}`} />}
                       </div>
                     </CardContent>
@@ -166,11 +163,11 @@ export default function ProjectDetailPage() {
           </section>
 
           <Card className="mt-8">
-            <CardHeader><CardTitle>Add another video</CardTitle><CardDescription>Upload a file or import a permitted public YouTube video into private storage.</CardDescription></CardHeader>
+            <CardHeader><CardTitle>Add another video</CardTitle><CardDescription>Choose a video from your device or use a YouTube link.</CardDescription></CardHeader>
             <CardContent>
               <div role="tablist" aria-label="Video source" className="mb-5 grid gap-3 sm:grid-cols-2">
-                <button type="button" role="tab" aria-selected={source === "upload"} onClick={() => setSource("upload")} className={`rounded-2xl border p-4 text-left transition ${source === "upload" ? "border-violet-400/40 bg-violet-500/10 text-white" : "border-white/[0.07] bg-black/10 text-zinc-500"}`}><UploadCloud className="h-5 w-5 text-violet-300" /><span className="mt-3 block text-sm font-medium">Upload Video</span><span className="mt-1 block text-xs opacity-70">Resumable multipart upload.</span></button>
-                <button type="button" role="tab" aria-selected={source === "youtube"} onClick={() => setSource("youtube")} className={`rounded-2xl border p-4 text-left transition ${source === "youtube" ? "border-violet-400/40 bg-violet-500/10 text-white" : "border-white/[0.07] bg-black/10 text-zinc-500"}`}><Youtube className="h-5 w-5 text-violet-300" /><span className="mt-3 block text-sm font-medium">Paste YouTube URL</span><span className="mt-1 block text-xs opacity-70">Permission-confirmed imports only.</span></button>
+                <button type="button" role="tab" aria-selected={source === "upload"} onClick={() => setSource("upload")} className={`rounded-2xl border p-4 text-left transition ${source === "upload" ? "border-violet-400/40 bg-violet-500/10 text-white" : "border-white/[0.07] bg-black/10 text-zinc-500"}`}><UploadCloud className="h-5 w-5 text-violet-300" /><span className="mt-3 block text-sm font-medium">Choose a video</span><span className="mt-1 block text-xs opacity-70">Pick one from this device.</span></button>
+                <button type="button" role="tab" aria-selected={source === "youtube"} onClick={() => setSource("youtube")} className={`rounded-2xl border p-4 text-left transition ${source === "youtube" ? "border-violet-400/40 bg-violet-500/10 text-white" : "border-white/[0.07] bg-black/10 text-zinc-500"}`}><Youtube className="h-5 w-5 text-violet-300" /><span className="mt-3 block text-sm font-medium">Use a YouTube link</span><span className="mt-1 block text-xs opacity-70">Only use videos you are allowed to use.</span></button>
               </div>
               {source === "upload" ? <MultipartUploader projectId={project.id} onUploadComplete={() => void refresh()} /> : <YouTubeImporter projectId={project.id} onImportChanged={() => void refresh()} />}
             </CardContent>

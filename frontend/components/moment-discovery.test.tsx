@@ -42,8 +42,8 @@ describe("moment discovery review", () => {
 
   it("renders a real loading state before the analysis request resolves", () => {
     const markup = renderToStaticMarkup(<MomentDiscovery assetId="asset-1" videoElementId="video-1" />);
-    expect(markup).toContain("Loading moment analysis");
-    expect(markup).toContain("Find Best Moments");
+    expect(markup).toContain("Checking for great moments");
+    expect(markup).toContain("Find the best parts");
   });
 
   it("renders review, boundary editing, preview, and reset controls", () => {
@@ -54,7 +54,7 @@ describe("moment discovery review", () => {
       onReview: async () => undefined,
       onPreview: () => undefined,
     }));
-    expect(markup).toContain("Review recommendation #1");
+    expect(markup).toContain("Clip idea #1");
     expect(markup).toContain("Preview range");
     expect(markup).toContain("Reset to AI");
     expect(markup).toContain("Save changes");

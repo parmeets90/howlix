@@ -81,7 +81,7 @@ export default function DashboardPage() {
           <div className="mt-5 flex min-h-80 flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 bg-white/[0.018] px-6 text-center">
             <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-violet-400/15 bg-violet-500/10 text-violet-300"><Video className="h-5 w-5" /></span>
             <h3 className="mt-5 text-lg font-medium text-white">No projects yet</h3>
-            <p className="mt-2 max-w-sm text-sm leading-6 text-zinc-500">Create a project, upload a video securely, and follow its validation status here.</p>
+            <p className="mt-2 max-w-sm text-sm leading-6 text-zinc-500">Add a video and let Howlix help you turn the best parts into short clips.</p>
             <Button asChild className="mt-6"><Link href="/dashboard/new">Create your first project <ArrowRight className="h-4 w-4" /></Link></Button>
           </div>
         )}

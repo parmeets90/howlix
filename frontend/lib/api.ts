@@ -259,7 +259,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     response = await fetch(`${API_URL}${path}`, { ...init, headers });
   } catch (cause) {
     if (cause instanceof ApiError) throw cause;
-    throw new Error("Could not connect to the Howlix API. Make sure the backend is running.");
+    throw new Error("Howlix is having trouble connecting. Please wait a moment and try again.");
   }
 
   if (!response.ok) {

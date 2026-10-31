@@ -7,8 +7,8 @@ import { ClipExports, ClipExportSettingsForm } from "./clip-exports";
 describe("clip exports", () => {
   it("renders export history without fabricating a finished preview", () => {
     const markup = renderToStaticMarkup(<ClipExports momentId="moment-1" />);
-    expect(markup).toContain("Finished clips");
-    expect(markup).toContain("No rendered clips yet");
+    expect(markup).toContain("Your clips");
+    expect(markup).toContain("No clips made yet");
     expect(markup).not.toContain("Download MP4");
   });
 

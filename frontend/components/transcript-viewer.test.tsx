@@ -23,6 +23,6 @@ describe("transcript viewer search", () => {
     const markup = renderToStaticMarkup(
       <TranscriptViewer assetId="asset-1" videoElementId="video-asset-1" />,
     );
-    expect(markup).toContain("Loading transcript status");
+    expect(markup).toContain("Checking your video");
   });
 });

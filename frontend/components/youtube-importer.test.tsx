@@ -14,9 +14,9 @@ import { YouTubeImporter } from "./youtube-importer";
 describe("YouTube importer", () => {
   it("requires provenance confirmation and offers manual-upload guidance", () => {
     const markup = renderToStaticMarkup(<YouTubeImporter projectId="project-1" />);
-    expect(markup).toContain("YouTube video URL");
-    expect(markup).toContain("I own this video or have explicit permission");
-    expect(markup).toContain("Playlists and restricted videos are not supported");
-    expect(markup).toContain("Import permitted video");
+    expect(markup).toContain("YouTube link");
+    expect(markup).toContain("I own this video, or I have permission to use it");
+    expect(markup).toContain("Playlists and private videos will not work");
+    expect(markup).toContain("Add YouTube video");
   });
 });

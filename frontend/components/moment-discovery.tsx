@@ -53,7 +53,7 @@ export function formatMomentTimestamp(milliseconds: number): string {
 
 function progressLabel(analysis: MomentAnalysis): string {
   const job = analysis.job;
-  if (!job) return "Preparing analysis";
+  if (!job) return "Getting ready to look";
   const stage = job.progress_stage?.replaceAll("_", " ") ?? job.status;
   if (job.progress_completed !== null && job.progress_total !== null) {
     return `${stage} · ${job.progress_completed} of ${job.progress_total}`;
@@ -114,7 +114,7 @@ export function MomentReviewPanel({
   return (
     <div className="rounded-xl border border-violet-300/15 bg-violet-300/[0.035] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div><p className="text-[10px] font-medium uppercase tracking-[0.16em] text-violet-300">Review recommendation #{candidate.rank}</p><p className="mt-1 text-xs text-zinc-600">This is a recommendation, not a rendered clip.</p></div>
+        <div><p className="text-[10px] font-medium uppercase tracking-[0.16em] text-violet-300">Clip idea #{candidate.rank}</p><p className="mt-1 text-xs text-zinc-600">This is an idea. Make the clip when you are happy with it.</p></div>
         <ReviewBadge status={candidate.review_status} />
       </div>
 
@@ -129,7 +129,7 @@ export function MomentReviewPanel({
       </div>
 
       <div className="mt-5 rounded-lg border border-white/[0.06] bg-black/20 p-3">
-        <p className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">Transcript excerpt</p>
+        <p className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">Words in this part</p>
         <p className="mt-2 max-h-32 overflow-y-auto text-xs leading-5 text-zinc-400">{candidate.transcript_excerpt}</p>
       </div>
       {error && <p className="mt-3 flex items-center gap-2 text-xs text-red-200"><AlertCircle className="h-3.5 w-3.5" />{error}</p>}
@@ -237,20 +237,20 @@ export function MomentDiscovery({ assetId, videoElementId }: { assetId: string; 
   return (
     <div className="mt-6 border-t border-white/[0.06] pt-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><p className="flex items-center gap-2 text-sm font-medium text-zinc-200"><Sparkles className="h-4 w-4 text-violet-300" /> Moment Discovery</p><p className="mt-1 text-xs text-zinc-600">AI-ranked clip recommendations with transparent editorial scoring.</p></div>
-        {!active && (!analysis || failed) && <Button type="button" size="sm" onClick={() => void start()} disabled={submitting}>{submitting ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : failed ? <RefreshCw className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}{failed ? "Retry discovery" : "Find Best Moments"}</Button>}
+        <div><p className="flex items-center gap-2 text-sm font-medium text-zinc-200"><Sparkles className="h-4 w-4 text-violet-300" /> Best moments</p><p className="mt-1 text-xs text-zinc-600">Howlix finds the parts people may enjoy most.</p></div>
+        {!active && (!analysis || failed) && <Button type="button" size="sm" onClick={() => void start()} disabled={submitting}>{submitting ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : failed ? <RefreshCw className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}{failed ? "Try again" : "Find the best parts"}</Button>}
       </div>
 
-      {loading && <p className="mt-4 flex items-center gap-2 text-xs text-zinc-500"><LoaderCircle className="h-3.5 w-3.5 animate-spin" /> Loading moment analysis</p>}
+      {loading && <p className="mt-4 flex items-center gap-2 text-xs text-zinc-500"><LoaderCircle className="h-3.5 w-3.5 animate-spin" /> Checking for great moments</p>}
       {active && analysis && <div className="mt-4 flex items-center gap-2 rounded-lg border border-violet-300/10 bg-violet-300/[0.04] px-3 py-2 text-xs capitalize text-violet-200"><LoaderCircle className="h-3.5 w-3.5 animate-spin" />{progressLabel(analysis)}</div>}
       {(error || analysis?.error_message || analysis?.job?.error_message || analysis?.job?.dispatch_error_message) && <div className="mt-4 flex gap-2 rounded-lg border border-red-400/15 bg-red-400/[0.04] p-3 text-xs leading-5 text-red-200"><AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />{error ?? analysis?.error_message ?? analysis?.job?.error_message ?? analysis?.job?.dispatch_error_message}</div>}
-      {active && analysis?.job?.dispatch_error_message && <Button className="mt-3" type="button" size="sm" variant="secondary" onClick={async () => { await redispatchJob(analysis.job!.id); await refresh(); }}><RefreshCw className="h-3.5 w-3.5" /> Retry runner</Button>}
+      {active && analysis?.job?.dispatch_error_message && <Button className="mt-3" type="button" size="sm" variant="secondary" onClick={async () => { await redispatchJob(analysis.job!.id); await refresh(); }}><RefreshCw className="h-3.5 w-3.5" /> Try again</Button>}
 
-      {analysis?.status === "completed" && moments.length === 0 && <div className="mt-4 rounded-xl border border-white/[0.06] bg-white/[0.02] p-5 text-sm text-zinc-500">No moments met the configured editorial-quality threshold. HOWLIX does not force low-quality recommendations.</div>}
+      {analysis?.status === "completed" && moments.length === 0 && <div className="mt-4 rounded-xl border border-white/[0.06] bg-white/[0.02] p-5 text-sm text-zinc-500">Howlix did not find a strong clip in this video. It will never suggest a weak one just to fill the list.</div>}
 
       {moments.length > 0 && <div className="mt-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs text-zinc-500">{moments.length} ranked recommendation{moments.length === 1 ? "" : "s"} · scores are editorial heuristics, not virality predictions</p>
+          <p className="text-xs text-zinc-500">Howlix found {moments.length} good part{moments.length === 1 ? "" : "s"}. You choose the winners.</p>
           <div className="flex gap-1 rounded-lg border border-white/[0.06] bg-black/20 p-1">{(["all", "pending", "approved", "rejected"] as const).map((value) => <button key={value} type="button" onClick={() => setFilter(value)} className={cn("rounded-md px-2 py-1 text-[10px] capitalize text-zinc-600 transition", filter === value && "bg-white/[0.07] text-zinc-200")}>{value}</button>)}</div>
         </div>
         <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(20rem,0.9fr)]">
@@ -259,7 +259,7 @@ export function MomentDiscovery({ assetId, videoElementId }: { assetId: string; 
               <div className="flex items-start gap-3"><div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-violet-300/15 bg-violet-300/[0.06] text-sm font-semibold text-violet-200">{Math.round(moment.overall_score)}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">#{moment.rank} · {moment.category}</span><ReviewBadge status={moment.review_status} /></div><p className="mt-1 truncate text-sm font-medium text-zinc-200">{moment.suggested_title}</p><p className="mt-1 flex items-center gap-1.5 text-[11px] text-zinc-600"><Clock3 className="h-3 w-3" />{formatMomentTimestamp(moment.start_ms)}–{formatMomentTimestamp(moment.end_ms)} · {Math.round(moment.duration_ms / 1000)}s</p></div><ChevronRight className="mt-2 h-4 w-4 text-zinc-700" /></div>
               <p className="mt-3 line-clamp-2 text-xs leading-5 text-zinc-500">“{moment.hook_text}”</p>
             </button>)}
-            {visibleMoments.length === 0 && <p className="rounded-xl border border-dashed border-white/10 px-4 py-8 text-center text-xs text-zinc-600">No recommendations match this review filter.</p>}
+            {visibleMoments.length === 0 && <p className="rounded-xl border border-dashed border-white/10 px-4 py-8 text-center text-xs text-zinc-600">Nothing matches this choice.</p>}
           </div>
           {selected && <div className="space-y-3">
             <div className="rounded-xl border border-white/[0.06] bg-black/20 p-4"><p className="text-sm font-medium text-zinc-200">Why it was selected</p><p className="mt-2 text-xs leading-5 text-zinc-500">{selected.explanation}</p>{selected.needs_context && <p className="mt-3 flex items-center gap-2 text-xs text-amber-200"><AlertCircle className="h-3.5 w-3.5" />May need context from the original video.</p>}<div className="mt-4 space-y-2">{Object.entries(selected.score_breakdown).map(([factor, value]) => <div key={factor} className="grid grid-cols-[1fr_auto] items-center gap-3 text-xs"><span className="text-zinc-500">{FACTOR_LABELS[factor] ?? factor}</span><span className={value.assessed ? "font-mono text-zinc-300" : "text-zinc-700"}>{value.assessed && value.score !== null ? Math.round(value.score) : "Unassessed"}</span></div>)}</div><p className="mt-4 border-t border-white/[0.06] pt-3 text-[11px] leading-4 text-zinc-700">{selected.confidence_notes}</p></div>

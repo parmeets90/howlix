@@ -34,7 +34,7 @@ export function uploadPartWithProgress(
         if (!etag) {
           reject(
             new UploadRequestError(
-              "R2 did not expose an ETag. Check the bucket CORS ExposeHeaders setting.",
+              "The upload service could not confirm this part. Please try again.",
               request.status,
             ),
           );
@@ -48,12 +48,12 @@ export function uploadPartWithProgress(
         new UploadRequestError(
           request.status === 401 || request.status === 403
             ? "The signed upload URL expired."
-            : `R2 rejected this upload part with status ${request.status}.`,
+            : `The upload service could not save this part (${request.status}).`,
           request.status,
         ),
       );
     };
-    request.onerror = () => reject(new UploadRequestError("A network error interrupted the R2 upload."));
+    request.onerror = () => reject(new UploadRequestError("Your connection was interrupted. Please try again."));
     request.onabort = () => reject(new UploadRequestAbortedError());
     request.send(blob);
   });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import {
   Check,
   CirclePause,
@@ -77,13 +77,21 @@ function recoveryKey(projectId: string): string {
   return `howlix-upload:${projectId}`;
 }
 
-export function MultipartUploader({
-  projectId,
-  onUploadComplete,
-}: {
+export type MultipartUploaderHandle = {
+  start: () => void;
+};
+
+export const MultipartUploader = forwardRef<MultipartUploaderHandle, {
   projectId: string;
   onUploadComplete?: (assetId: string) => void;
-}) {
+  onSelectionChange?: (selected: boolean) => void;
+  showStartButton?: boolean;
+}>(function MultipartUploader({
+  projectId,
+  onUploadComplete,
+  onSelectionChange,
+  showStartButton = true,
+}, ref) {
   const inputRef = useRef<HTMLInputElement>(null);
   const activeRequests = useRef(new Set<XMLHttpRequest>());
   const sessionRef = useRef<UploadSession | null>(null);
@@ -101,6 +109,7 @@ export function MultipartUploader({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!projectId) return;
     const raw = window.localStorage.getItem(recoveryKey(projectId));
     if (!raw) return;
     let record: RecoveryRecord;
@@ -139,6 +148,7 @@ export function MultipartUploader({
     }
     setError(validationError);
     setSelectedFile(validationError ? null : file);
+    onSelectionChange?.(!validationError);
     setStatus(validationError ? "idle" : "selected");
   }
 
@@ -166,7 +176,7 @@ export function MultipartUploader({
 
   async function uploadSelectedFile() {
     const file = selectedFile;
-    if (!file) return;
+    if (!file || !projectId) return;
     const mimeType = validatedMimeType(file);
     if (!mimeType) return;
     setError(null);
@@ -289,6 +299,10 @@ export function MultipartUploader({
     }
   }
 
+  useImperativeHandle(ref, () => ({
+    start: () => { void uploadSelectedFile(); },
+  }));
+
   function pauseUpload() {
     pausedRef.current = true;
     setStatus("paused");
@@ -316,7 +330,7 @@ export function MultipartUploader({
         return;
       }
     }
-    window.localStorage.removeItem(recoveryKey(projectId));
+    if (projectId) window.localStorage.removeItem(recoveryKey(projectId));
     sessionRef.current = null;
     setRecovery(null);
     setProgress(0);
@@ -345,8 +359,8 @@ export function MultipartUploader({
     <div className="space-y-4">
       {recovery && !selectedFile && (
         <div className="flex flex-col gap-3 rounded-xl border border-violet-400/20 bg-violet-500/[0.06] p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div><p className="text-sm font-medium text-violet-100">Upload recovery available</p><p className="mt-1 text-xs text-zinc-500">Select {recovery.fileName} again to reconcile completed R2 parts.</p></div>
-          <Button type="button" size="sm" variant="ghost" onClick={() => void discardRecovery()}>Discard session</Button>
+          <div><p className="text-sm font-medium text-violet-100">Continue your upload</p><p className="mt-1 text-xs text-zinc-500">Choose {recovery.fileName} again and Howlix will continue where it stopped.</p></div>
+          <Button type="button" size="sm" variant="ghost" onClick={() => void discardRecovery()}>Start over</Button>
         </div>
       )}
 
@@ -375,24 +389,24 @@ export function MultipartUploader({
         <div className="rounded-2xl border border-violet-400/20 bg-violet-500/[0.05] p-5">
           <div className="flex items-center gap-4">
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-500/15 text-violet-300"><FileVideo className="h-5 w-5" /></span>
-            <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-zinc-200">{selectedFile.name}</p><p className="mt-1 text-xs text-zinc-500">{formatFileSize(selectedFile.size)} · Direct to private R2 storage</p></div>
-            {!active && status !== "completed" && <Button type="button" variant="ghost" size="icon" aria-label="Remove selected file" onClick={() => { setSelectedFile(null); setError(null); setStatus("idle"); if (inputRef.current) inputRef.current.value = ""; }}><X className="h-4 w-4" /></Button>}
+            <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-zinc-200">{selectedFile.name}</p><p className="mt-1 text-xs text-zinc-500">{formatFileSize(selectedFile.size)} · Kept private</p></div>
+            {!active && status !== "completed" && <Button type="button" variant="ghost" size="icon" aria-label="Remove selected file" onClick={() => { setSelectedFile(null); onSelectionChange?.(false); setError(null); setStatus("idle"); if (inputRef.current) inputRef.current.value = ""; }}><X className="h-4 w-4" /></Button>}
           </div>
 
           {status !== "selected" && status !== "idle" && (
             <div className="mt-5">
-              <div className="flex items-center justify-between text-xs"><span className="capitalize text-zinc-400">{status === "verifying" ? "Verifying upload" : status === "processing" ? "Validation queued" : status}</span><span className="font-mono text-zinc-500">{progress.toFixed(1)}%</span></div>
+              <div className="flex items-center justify-between text-xs"><span className="capitalize text-zinc-400">{status === "verifying" ? "Checking your video" : status === "processing" ? "Getting your video ready" : status}</span><span className="font-mono text-zinc-500">{progress.toFixed(1)}%</span></div>
               <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/[0.06]"><div className="h-full rounded-full bg-violet-500 transition-[width] duration-150" style={{ width: `${progress}%` }} /></div>
             </div>
           )}
 
           <div className="mt-5 flex flex-wrap gap-2">
-            {(status === "selected" || status === "failed") && <Button type="button" size="sm" onClick={() => void uploadSelectedFile()}>{status === "failed" ? <><RotateCcw className="h-3.5 w-3.5" /> Retry</> : <><UploadCloud className="h-3.5 w-3.5" /> {recovery ? "Resume upload" : "Start upload"}</>}</Button>}
+            {(status === "failed" || (status === "selected" && showStartButton)) && <Button type="button" size="sm" onClick={() => void uploadSelectedFile()}>{status === "failed" ? <><RotateCcw className="h-3.5 w-3.5" /> Try again</> : <><UploadCloud className="h-3.5 w-3.5" /> {recovery ? "Continue upload" : "Upload video"}</>}</Button>}
             {status === "uploading" && <Button type="button" size="sm" variant="secondary" onClick={pauseUpload}><CirclePause className="h-3.5 w-3.5" /> Pause</Button>}
             {status === "paused" && <Button type="button" size="sm" onClick={resumeUpload}><CirclePlay className="h-3.5 w-3.5" /> Resume</Button>}
             {active && status !== "processing" && <Button type="button" size="sm" variant="ghost" onClick={() => void cancelUpload()}><X className="h-3.5 w-3.5" /> Cancel</Button>}
-            {(status === "verifying" || status === "processing") && <span className="inline-flex items-center gap-2 px-2 text-xs text-zinc-500"><LoaderCircle className="h-3.5 w-3.5 animate-spin" /> {status === "verifying" ? "Reconciling R2 parts" : "Waiting for the worker"}</span>}
-            {status === "completed" && <span className="inline-flex items-center gap-2 text-sm text-emerald-300"><Check className="h-4 w-4" /> Upload completed</span>}
+            {(status === "verifying" || status === "processing") && <span className="inline-flex items-center gap-2 px-2 text-xs text-zinc-500"><LoaderCircle className="h-3.5 w-3.5 animate-spin" /> {status === "verifying" ? "Checking everything" : "Getting your video ready"}</span>}
+            {status === "completed" && <span className="inline-flex items-center gap-2 text-sm text-emerald-300"><Check className="h-4 w-4" /> Video added</span>}
             {status === "cancelled" && <Button type="button" size="sm" variant="secondary" onClick={() => { setSelectedFile(null); setStatus("idle"); }}><RefreshCw className="h-3.5 w-3.5" /> Choose another file</Button>}
           </div>
         </div>
@@ -400,4 +414,4 @@ export function MultipartUploader({
       {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
     </div>
   );
-}
+});

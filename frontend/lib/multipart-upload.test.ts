@@ -86,6 +86,6 @@ describe("uploadPartWithProgress", () => {
         undefined,
         factory(fake),
       ),
-    ).rejects.toThrow("ExposeHeaders");
+    ).rejects.toThrow("could not confirm this part");
   });
 });
