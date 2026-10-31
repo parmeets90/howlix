@@ -21,6 +21,7 @@ temp/
 .tmp/
 backend/tmp/
 backend/temp/
+backend/tmp_live_transcription_status.py
 *.db
 *.sqlite
 *.sqlite3

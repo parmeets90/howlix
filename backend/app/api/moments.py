@@ -30,6 +30,7 @@ from app.schemas import (
     MomentUpdateRequest,
 )
 from app.services.quotas import QuotaExceededError, consume_analysis
+from app.services.github_dispatch import dispatch_job
 
 
 router = APIRouter(tags=["moment discovery"])
@@ -234,6 +235,7 @@ def discover_moments(
         job.progress_total = None
     db.commit()
     db.refresh(run)
+    dispatch_job(db, job.id, settings, owner_id=user.id)
     return _analysis_response(db, run)
 
 

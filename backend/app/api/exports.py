@@ -32,6 +32,7 @@ from app.services.export_storage import export_object_key
 from app.services.framing import output_dimensions
 from app.services.storage import StorageError, StorageService, get_storage_service
 from app.services.quotas import QuotaExceededError, enforce_render_concurrency
+from app.services.github_dispatch import dispatch_job
 
 
 router = APIRouter(tags=["clip exports"])
@@ -216,6 +217,7 @@ def create_export(
         job.finished_at = None
     db.commit()
     db.refresh(export)
+    dispatch_job(db, job.id, settings, owner_id=user.id)
     return _response(db, export)
 
 

@@ -28,6 +28,7 @@ from app.schemas import (
     TranscriptWordResponse,
 )
 from app.services.quotas import QuotaExceededError, consume_transcription
+from app.services.github_dispatch import dispatch_job
 
 
 router = APIRouter(tags=["transcription"])
@@ -167,6 +168,7 @@ def request_transcription(
     db.commit()
     db.refresh(transcript)
     db.refresh(job)
+    dispatch_job(db, job.id, settings, owner_id=user.id)
     return TranscriptionStatusResponse(
         asset_id=asset_id,
         transcript_id=transcript.id,

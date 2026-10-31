@@ -12,6 +12,7 @@ from app.api.projects import router as projects_router
 from app.api.transcripts import router as transcripts_router
 from app.api.uploads import router as uploads_router
 from app.api.youtube_imports import router as youtube_imports_router
+from app.api.jobs import router as jobs_router
 from app.config import get_settings
 from app.errors import register_error_handlers
 
@@ -44,6 +45,7 @@ def create_app() -> FastAPI:
     app.include_router(account_router, prefix="/api/v1")
     app.include_router(uploads_router, prefix="/api/v1")
     app.include_router(youtube_imports_router, prefix="/api/v1")
+    app.include_router(jobs_router, prefix="/api/v1")
     app.include_router(media_router, prefix="/api/v1")
     app.include_router(transcripts_router, prefix="/api/v1")
     app.include_router(moments_router, prefix="/api/v1")

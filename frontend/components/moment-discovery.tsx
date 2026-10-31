@@ -24,6 +24,7 @@ import {
   getMomentAnalysis,
   listMoments,
   reviewMoment,
+  redispatchJob,
   updateMoment,
   type MomentAnalysis,
   type MomentCandidate,
@@ -242,7 +243,8 @@ export function MomentDiscovery({ assetId, videoElementId }: { assetId: string; 
 
       {loading && <p className="mt-4 flex items-center gap-2 text-xs text-zinc-500"><LoaderCircle className="h-3.5 w-3.5 animate-spin" /> Loading moment analysis</p>}
       {active && analysis && <div className="mt-4 flex items-center gap-2 rounded-lg border border-violet-300/10 bg-violet-300/[0.04] px-3 py-2 text-xs capitalize text-violet-200"><LoaderCircle className="h-3.5 w-3.5 animate-spin" />{progressLabel(analysis)}</div>}
-      {(error || analysis?.error_message || analysis?.job?.error_message) && <div className="mt-4 flex gap-2 rounded-lg border border-red-400/15 bg-red-400/[0.04] p-3 text-xs leading-5 text-red-200"><AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />{error ?? analysis?.error_message ?? analysis?.job?.error_message}</div>}
+      {(error || analysis?.error_message || analysis?.job?.error_message || analysis?.job?.dispatch_error_message) && <div className="mt-4 flex gap-2 rounded-lg border border-red-400/15 bg-red-400/[0.04] p-3 text-xs leading-5 text-red-200"><AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />{error ?? analysis?.error_message ?? analysis?.job?.error_message ?? analysis?.job?.dispatch_error_message}</div>}
+      {active && analysis?.job?.dispatch_error_message && <Button className="mt-3" type="button" size="sm" variant="secondary" onClick={async () => { await redispatchJob(analysis.job!.id); await refresh(); }}><RefreshCw className="h-3.5 w-3.5" /> Retry runner</Button>}
 
       {analysis?.status === "completed" && moments.length === 0 && <div className="mt-4 rounded-xl border border-white/[0.06] bg-white/[0.02] p-5 text-sm text-zinc-500">No moments met the configured editorial-quality threshold. HOWLIX does not force low-quality recommendations.</div>}
 

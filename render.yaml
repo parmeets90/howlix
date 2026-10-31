@@ -1,0 +1,65 @@
+services:
+  - type: web
+    name: howlix-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: python -m pip install --upgrade pip && python -m pip install -r requirements-api.txt
+    startCommand: python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /health
+    autoDeployTrigger: off
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: HOWLIX_ENVIRONMENT
+        value: production
+      - key: HOWLIX_DATABASE_SCHEMA
+        value: howlix
+      - key: HOWLIX_PUBLIC_APP_URL
+        value: https://howlix.wolvesgang.digital
+      - key: HOWLIX_CORS_ORIGINS
+        value: https://howlix.wolvesgang.digital
+      - key: HOWLIX_ALLOWED_HOSTS
+        value: api.howlix.wolvesgang.digital,*.onrender.com
+      - key: SUPABASE_JWT_AUDIENCE
+        value: authenticated
+      - key: SUPABASE_JWT_VERIFICATION_MODE
+        value: jwks
+      - key: R2_BUCKET_NAME
+        value: howlix-media
+      - key: R2_REGION
+        value: auto
+      - key: MAX_CONCURRENT_JOBS
+        value: "1"
+      - key: BETA_MAX_CONCURRENT_RENDERS
+        value: "1"
+      - key: YOUTUBE_IMPORT_MAX_CONCURRENT_PER_USER
+        value: "1"
+      - key: GITHUB_ACTIONS_DISPATCH_ENABLED
+        value: "false"
+      - key: GITHUB_REPOSITORY
+        value: parmeets90/howlix
+      - key: GITHUB_WORKER_WORKFLOW
+        value: howlix-worker.yml
+      - key: GITHUB_WORKER_REF
+        value: main
+      - key: GITHUB_ACTIONS_MAX_ACTIVE_JOBS
+        value: "2"
+      - key: HOWLIX_DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_JWT_ISSUER
+        sync: false
+      - key: SUPABASE_JWKS_URL
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: GITHUB_ACTIONS_TOKEN
+        sync: false

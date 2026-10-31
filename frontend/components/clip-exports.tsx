@@ -21,6 +21,7 @@ import {
   createClipExport,
   getClipExportDownload,
   listClipExports,
+  redispatchJob,
   type CaptionPreset,
   type ClipExport,
   type ClipExportSettings,
@@ -147,7 +148,8 @@ export function ClipExports({ momentId }: { momentId: string }) {
       return <div key={item.id} className="rounded-xl border border-white/[0.06] bg-black/20 p-4">
         <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-medium text-zinc-300">{item.aspect_ratio} · {item.resolution} · {item.caption_preset} captions</p><p className="mt-1 text-[11px] capitalize text-zinc-600">{item.framing_mode} framing · {item.fps.toFixed(2)} fps</p></div><span className={cn("inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.08em]", item.status === "completed" ? "border-emerald-300/15 text-emerald-200" : item.status === "failed" ? "border-red-300/15 text-red-200" : "border-violet-300/15 text-violet-200")}>{ACTIVE.has(item.status) && <LoaderCircle className="h-3 w-3 animate-spin" />}{item.status === "completed" && <CheckCircle2 className="h-3 w-3" />}{item.status}</span></div>
         {ACTIVE.has(item.status) && <div className="mt-3"><p className="text-[11px] capitalize text-violet-200">{exportProgress(item)}</p>{item.job?.progress_total ? <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/[0.05]"><div className="h-full bg-violet-400 transition-all" style={{ width: `${Math.min(100, (item.job.progress_completed ?? 0) / item.job.progress_total * 100)}%` }} /></div> : null}<Button className="mt-3" size="sm" variant="ghost" onClick={async () => { await cancelClipExport(item.id); await refresh(); }}><X className="h-3.5 w-3.5" /> Cancel</Button></div>}
-        {item.error_message && <p className="mt-3 text-xs leading-5 text-red-200">{item.error_message}</p>}
+        {(item.error_message || item.job?.dispatch_error_message) && <p className="mt-3 text-xs leading-5 text-red-200">{item.error_message || item.job?.dispatch_error_message}</p>}
+        {ACTIVE.has(item.status) && item.job?.dispatch_error_message && <Button className="mt-3" size="sm" variant="secondary" onClick={async () => { await redispatchJob(item.job!.id); await refresh(); }}><RefreshCw className="h-3.5 w-3.5" /> Retry runner</Button>}
         {(item.status === "failed" || item.status === "cancelled") && <Button className="mt-3" size="sm" variant="secondary" onClick={() => void retry(item)}><RefreshCw className="h-3.5 w-3.5" /> Retry</Button>}
         {item.status === "completed" && <div className="mt-3">{url ? <><video controls preload="metadata" src={url} className="max-h-96 w-full rounded-lg bg-black object-contain" /><div className="mt-3 flex flex-wrap items-center gap-2"><Button asChild size="sm"><a href={url} download><Download className="h-3.5 w-3.5" /> Download MP4</a></Button><span className="text-[11px] text-zinc-600">{item.file_size_bytes ? formatFileSize(item.file_size_bytes) : "MP4"} · private temporary URL</span></div></> : <Button size="sm" variant="secondary" onClick={() => void loadDownload(item)}><Play className="h-3.5 w-3.5" /> Load finished preview</Button>}</div>}
       </div>;

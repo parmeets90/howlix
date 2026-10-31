@@ -125,6 +125,31 @@ class Settings(BaseSettings):
     )
     worker_poll_seconds: float = Field(default=2.0, ge=0.1, validation_alias="WORKER_POLL_SECONDS")
     job_lease_seconds: int = Field(default=300, ge=30, validation_alias="JOB_LEASE_SECONDS")
+    github_actions_dispatch_enabled: bool = Field(
+        default=False, validation_alias="GITHUB_ACTIONS_DISPATCH_ENABLED"
+    )
+    github_repository: str = Field(
+        default="parmeets90/howlix", validation_alias="GITHUB_REPOSITORY"
+    )
+    github_worker_workflow: str = Field(
+        default="howlix-worker.yml", validation_alias="GITHUB_WORKER_WORKFLOW"
+    )
+    github_worker_ref: str = Field(default="main", validation_alias="GITHUB_WORKER_REF")
+    github_actions_token: SecretStr | None = Field(
+        default=None, validation_alias="GITHUB_ACTIONS_TOKEN"
+    )
+    github_dispatch_timeout_seconds: int = Field(
+        default=10, ge=2, le=30, validation_alias="GITHUB_DISPATCH_TIMEOUT_SECONDS"
+    )
+    github_dispatch_max_attempts: int = Field(
+        default=3, ge=1, le=5, validation_alias="GITHUB_DISPATCH_MAX_ATTEMPTS"
+    )
+    github_runner_startup_timeout_seconds: int = Field(
+        default=600, ge=60, le=3600, validation_alias="GITHUB_RUNNER_STARTUP_TIMEOUT_SECONDS"
+    )
+    github_actions_max_active_jobs: int = Field(
+        default=2, ge=1, le=10, validation_alias="GITHUB_ACTIONS_MAX_ACTIVE_JOBS"
+    )
     processing_temp_dir: Path | None = Field(default=None, validation_alias="PROCESSING_TEMP_DIR")
     delete_invalid_media: bool = Field(default=True, validation_alias="DELETE_INVALID_MEDIA")
     transcription_provider: Literal["groq", "faster-whisper"] = Field(

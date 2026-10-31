@@ -31,6 +31,7 @@ from app.services.quotas import (
     reserve_storage,
 )
 from app.services.youtube_import import validate_youtube_url
+from app.services.github_dispatch import dispatch_job
 
 
 router = APIRouter(tags=["youtube-imports"])
@@ -180,6 +181,7 @@ def create_youtube_import(
         return _response(existing, _job(db, existing))
     db.refresh(value)
     db.refresh(job)
+    dispatch_job(db, job.id, settings, owner_id=user.id)
     return _response(value, job)
 
 
@@ -277,4 +279,5 @@ def retry_youtube_import(
     job.lease_expires_at = None
     job.finished_at = None
     db.commit()
+    dispatch_job(db, job.id, settings, owner_id=user.id)
     return _response(value, job)

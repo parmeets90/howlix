@@ -12,6 +12,7 @@ from app.models import (
     ClipExportStatus,
     ExportAspectRatio,
     FramingMode,
+    JobDispatchStatus,
     MomentAnalysisStatus,
     MomentReviewStatus,
     ProcessingJobStatus,
@@ -130,6 +131,9 @@ class ProcessingJobSummary(BaseModel):
     attempts: int
     max_attempts: int
     error_message: str | None
+    dispatch_status: JobDispatchStatus | None
+    dispatch_attempts: int
+    dispatch_error_message: str | None
     progress_stage: str | None
     progress_completed: int | None
     progress_total: int | None

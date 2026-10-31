@@ -10,6 +10,7 @@ import {
   createYouTubeImport,
   listYouTubeImports,
   retryYouTubeImport,
+  redispatchJob,
   type YouTubeImport,
 } from "@/lib/api";
 import { formatFileSize } from "@/lib/utils";
@@ -81,6 +82,12 @@ export function YouTubeImporter({
     }
   }
 
+  async function retryRunner(jobId: string) {
+    setError(null);
+    try { await redispatchJob(jobId); await refresh(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "The processing runner could not be restarted."); }
+  }
+
   return (
     <div className="space-y-5">
       <form onSubmit={submit} className="space-y-4">
@@ -127,9 +134,10 @@ export function YouTubeImporter({
                   </span>
                 </div>
                 {active && <p className="mt-3 text-xs text-zinc-500">{value.job?.progress_stage?.replaceAll("_", " ") ?? "Waiting for worker"}{value.job?.progress_completed ? ` · ${formatFileSize(value.job.progress_completed)} received` : ""}</p>}
-                {value.error_message && <p className="mt-3 text-xs leading-5 text-red-200">{value.error_message}</p>}
+                {(value.error_message || value.job?.dispatch_error_message) && <p className="mt-3 text-xs leading-5 text-red-200">{value.error_message || value.job?.dispatch_error_message}</p>}
                 <div className="mt-3 flex gap-2">
                   {active && <Button type="button" size="sm" variant="ghost" onClick={() => void action(value.id, "cancel")}><X className="h-3.5 w-3.5" /> Cancel</Button>}
+                  {active && value.job?.dispatch_error_message && <Button type="button" size="sm" variant="secondary" onClick={() => void retryRunner(value.job!.id)}><RotateCcw className="h-3.5 w-3.5" /> Retry runner</Button>}
                   {(value.status === "failed" || value.status === "cancelled") && <Button type="button" size="sm" variant="secondary" onClick={() => void action(value.id, "retry")}><RotateCcw className="h-3.5 w-3.5" /> Retry</Button>}
                 </div>
               </div>

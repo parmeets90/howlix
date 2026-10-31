@@ -32,6 +32,7 @@ export class ApiError extends Error {
 export type UploadSessionStatus = "initiated" | "uploading" | "completed" | "aborted" | "expired" | "failed";
 export type MediaAssetStatus = "pending_upload" | "importing" | "uploading" | "uploaded" | "validating" | "ready" | "rejected" | "failed" | "aborted";
 export type ProcessingJobStatus = "queued" | "processing" | "retry" | "succeeded" | "failed" | "cancelled";
+export type JobDispatchStatus = "pending" | "dispatching" | "dispatched" | "failed";
 export type YouTubeImportStatus = "queued" | "processing" | "retry" | "completed" | "failed" | "cancelled";
 export type TranscriptStatus = "queued" | "processing" | "retry" | "completed" | "failed";
 export type MomentAnalysisStatus = "queued" | "processing" | "retry" | "completed" | "failed";
@@ -79,6 +80,9 @@ export type MediaAsset = {
     attempts: number;
     max_attempts: number;
     error_message: string | null;
+    dispatch_status: JobDispatchStatus | null;
+    dispatch_attempts: number;
+    dispatch_error_message: string | null;
     progress_stage: string | null;
     progress_completed: number | null;
     progress_total: number | null;
@@ -364,6 +368,10 @@ export function cancelYouTubeImport(importId: string): Promise<YouTubeImport> {
 
 export function retryYouTubeImport(importId: string): Promise<YouTubeImport> {
   return request(`/api/v1/youtube-imports/${importId}/retry`, { method: "POST" });
+}
+
+export function redispatchJob(jobId: string): Promise<MediaAsset["latest_job"]> {
+  return request(`/api/v1/jobs/${jobId}/dispatch`, { method: "POST" });
 }
 
 export function listProjectMedia(projectId: string): Promise<MediaAsset[]> {

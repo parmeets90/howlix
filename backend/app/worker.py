@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import argparse
+import sys
 import tempfile
 import time
 import uuid
@@ -94,6 +96,7 @@ from app.services.youtube_import import (
     YouTubeImportUnavailable,
     ValidatedYouTubeUrl,
 )
+from app.services.github_dispatch import dispatch_job
 
 
 logger = logging.getLogger("howlix.worker")
@@ -213,6 +216,67 @@ def claim_next_job(
         return job.id
 
 
+def claim_job_by_id(
+    db: Session,
+    job_id: uuid.UUID,
+    worker_id: str,
+    settings: Settings,
+    now: datetime | None = None,
+) -> uuid.UUID | None:
+    """Atomically claim one explicitly authorized persisted job."""
+    now = now or datetime.now(timezone.utc)
+    with db.begin():
+        job = db.scalar(
+            select(ProcessingJob)
+            .where(ProcessingJob.id == job_id)
+            .with_for_update(skip_locked=True)
+        )
+        if (
+            job is None
+            or job.owner_id is None
+            or job.job_type not in set(ProcessingJobType)
+            or job.attempts >= job.max_attempts
+        ):
+            return None
+        asset = db.get(MediaAsset, job.asset_id)
+        if asset is None or asset.owner_id != job.owner_id:
+            return None
+        eligible = job.status == ProcessingJobStatus.QUEUED or (
+            job.status in {ProcessingJobStatus.RETRY, ProcessingJobStatus.PROCESSING}
+            and (
+                job.lease_expires_at is None
+                or job.lease_expires_at.replace(
+                    tzinfo=job.lease_expires_at.tzinfo or timezone.utc
+                )
+                < now
+            )
+        )
+        if not eligible:
+            return None
+        if job.job_type == ProcessingJobType.CLIP_RENDER:
+            active_render = db.scalar(
+                select(ProcessingJob.id)
+                .where(
+                    ProcessingJob.id != job.id,
+                    ProcessingJob.job_type == ProcessingJobType.CLIP_RENDER,
+                    ProcessingJob.status == ProcessingJobStatus.PROCESSING,
+                    ProcessingJob.lease_expires_at >= now,
+                )
+                .limit(1)
+            )
+            if active_render is not None:
+                return None
+        job.status = ProcessingJobStatus.PROCESSING
+        job.attempts += 1
+        job.claimed_by = worker_id
+        job.lease_expires_at = now + timedelta(seconds=settings.job_lease_seconds)
+        job.started_at = job.started_at or now
+        job.finished_at = None
+        job.dispatch_error_message = None
+        job.progress_stage = "processing"
+        return job.id
+
+
 class LeaseHeartbeat:
     def __init__(
         self,
@@ -308,7 +372,7 @@ class MediaValidationWorker:
                     )
                 except StorageError as exc:
                     if exc.code not in {"NoSuchUpload", "404", "10024"}:
-                        logger.warning("Could not abort expired upload %s", session.id)
+                        logger.warning("Could not abort an expired multipart upload.")
                         continue
                 session.status = UploadSessionStatus.EXPIRED
                 asset.status = MediaAssetStatus.ABORTED
@@ -322,6 +386,18 @@ class MediaValidationWorker:
             job_id = claim_next_job(db, self.worker_id, self.settings)
         if job_id is None:
             return False
+        self._process_claimed_job(job_id)
+        return True
+
+    def run_job_by_id(self, job_id: uuid.UUID) -> bool:
+        with self.session_factory() as db:
+            claimed = claim_job_by_id(db, job_id, self.worker_id, self.settings)
+        if claimed is None:
+            return False
+        self._process_claimed_job(claimed)
+        return True
+
+    def _process_claimed_job(self, job_id: uuid.UUID) -> None:
         with self.session_factory() as db:
             job = db.get(ProcessingJob, job_id)
             job_type = job.job_type if job else None
@@ -335,7 +411,6 @@ class MediaValidationWorker:
             self._process_youtube_import_job(job_id)
         else:
             self._process_validation_job(job_id)
-        return True
 
     def _process_validation_job(self, job_id: uuid.UUID) -> None:
         with self.session_factory() as db:
@@ -421,7 +496,7 @@ class MediaValidationWorker:
                 if job is not None:
                     self._finish_infrastructure_failure(db, job, asset, str(exc))
         except Exception as exc:
-            logger.exception("Unexpected validation worker failure for job %s", job_id)
+            logger.error("Unexpected validation worker failure.")
             with self.session_factory() as db:
                 job = db.get(ProcessingJob, job_id)
                 asset = db.get(MediaAsset, job.asset_id) if job else None
@@ -494,7 +569,7 @@ class MediaValidationWorker:
             self.storage.delete_object(object_key)
         except StorageError as exc:
             if exc.code not in {"NoSuchKey", "404", "10024"}:
-                logger.warning("Could not clean incomplete YouTube import object %s", object_key)
+                logger.warning("Could not clean an incomplete YouTube import object.")
 
     def _process_youtube_import_job(self, job_id: uuid.UUID) -> None:
         with self.session_factory() as db:
@@ -628,20 +703,23 @@ class MediaValidationWorker:
                     )
                 )
                 if validation_job is None:
-                    db.add(
-                        ProcessingJob(
-                            owner_id=value.owner_id,
-                            asset_id=asset.id,
-                            job_type=ProcessingJobType.VALIDATE_MEDIA,
-                            status=ProcessingJobStatus.QUEUED,
-                            max_attempts=3,
-                            progress_stage="queued",
-                        )
+                    validation_job = ProcessingJob(
+                        owner_id=value.owner_id,
+                        asset_id=asset.id,
+                        job_type=ProcessingJobType.VALIDATE_MEDIA,
+                        status=ProcessingJobStatus.QUEUED,
+                        max_attempts=3,
+                        progress_stage="queued",
                     )
+                    db.add(validation_job)
+                    db.flush()
                 self._mark_job_succeeded(job)
                 job.progress_completed = actual_size
                 job.progress_total = actual_size
                 db.commit()
+                dispatch_job(
+                    db, validation_job.id, self.settings, owner_id=value.owner_id
+                )
         except YouTubeImportCancelled as exc:
             if uploaded:
                 self._cleanup_import_object(object_key)
@@ -675,7 +753,7 @@ class MediaValidationWorker:
                 self._cleanup_import_object(object_key)
             self._finish_youtube_import_failure(job_id, import_id, str(exc), retryable=True)
         except Exception as exc:
-            logger.exception("Unexpected YouTube import failure for job %s", job_id)
+            logger.error("Unexpected YouTube import failure.")
             if uploaded:
                 self._cleanup_import_object(object_key)
             self._finish_youtube_import_failure(
@@ -896,7 +974,7 @@ class MediaValidationWorker:
                         db, job, transcript, str(exc), retryable=True
                     )
         except Exception as exc:
-            logger.exception("Unexpected transcription worker failure for job %s", job_id)
+            logger.error("Unexpected transcription worker failure.")
             with self.session_factory() as db:
                 job = db.get(ProcessingJob, job_id)
                 transcript = db.scalar(
@@ -1139,7 +1217,7 @@ class MediaValidationWorker:
                 if job is not None:
                     self._finish_moment_failure(db, job, run, str(exc), retryable=True)
         except Exception as exc:
-            logger.exception("Unexpected moment discovery failure for job %s", job_id)
+            logger.error("Unexpected moment discovery failure.")
             with self.session_factory() as db:
                 job = db.get(ProcessingJob, job_id)
                 run = db.get(MomentAnalysisRun, run_id)
@@ -1199,7 +1277,7 @@ class MediaValidationWorker:
             self.storage.delete_object(object_key)
         except StorageError as exc:
             if exc.code not in {"NoSuchKey", "404"}:
-                logger.warning("Could not clean incomplete export object %s", object_key)
+                logger.warning("Could not clean an incomplete export object.")
 
     def _process_clip_render_job(self, job_id: uuid.UUID) -> None:
         with self.session_factory() as db:
@@ -1468,7 +1546,7 @@ class MediaValidationWorker:
                 if job is not None:
                     self._finish_clip_failure(db, job, export, str(exc), retryable=True)
         except Exception as exc:
-            logger.exception("Unexpected clip render failure for job %s", job_id)
+            logger.error("Unexpected clip render failure.")
             self._cleanup_export_object(object_key)
             with self.session_factory() as db:
                 job = db.get(ProcessingJob, job_id)
@@ -1523,8 +1601,37 @@ def main() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
+    parser = argparse.ArgumentParser(description="Howlix durable media worker")
+    parser.add_argument("--job-id", type=uuid.UUID, help="Process only this persisted job ID")
+    args = parser.parse_args()
     settings = get_settings()
     worker = MediaValidationWorker(settings, get_storage_service())
+    if args.job_id is not None:
+        worker.worker_id = f"gha-{uuid.uuid4().hex[:12]}"
+        logger.info("Howlix one-shot worker started.")
+        while True:
+            if worker.run_job_by_id(args.job_id):
+                with worker.session_factory() as db:
+                    job = db.get(ProcessingJob, args.job_id)
+                    if job is None:
+                        sys.exit(2)
+                    if job.status == ProcessingJobStatus.RETRY and job.attempts < job.max_attempts:
+                        delay = 0.0
+                        if job.lease_expires_at is not None:
+                            delay = max(
+                                0.0,
+                                (job.lease_expires_at - datetime.now(timezone.utc)).total_seconds(),
+                            )
+                        time.sleep(min(delay, 300.0))
+                        continue
+                    if job.status == ProcessingJobStatus.SUCCEEDED:
+                        return
+                    if job.status == ProcessingJobStatus.CANCELLED:
+                        return
+                    sys.exit(1)
+            logger.error("Requested job is missing, ineligible, or already claimed.")
+            sys.exit(2)
+
     logger.info("Howlix media worker started as %s", worker.worker_id)
     try:
         while True:

@@ -82,6 +82,13 @@ class ProcessingJobStatus(str, enum.Enum):
     CANCELLED = "cancelled"
 
 
+class JobDispatchStatus(str, enum.Enum):
+    PENDING = "pending"
+    DISPATCHING = "dispatching"
+    DISPATCHED = "dispatched"
+    FAILED = "failed"
+
+
 class TranscriptStatus(str, enum.Enum):
     QUEUED = "queued"
     PROCESSING = "processing"
@@ -308,6 +315,10 @@ class ProcessingJob(Base):
     __tablename__ = "processing_jobs"
     __table_args__ = (
         CheckConstraint("attempts >= 0", name="ck_processing_jobs_attempts_nonnegative"),
+        CheckConstraint(
+            "dispatch_attempts >= 0",
+            name="ck_processing_jobs_dispatch_attempts_nonnegative",
+        ),
         CheckConstraint("max_attempts > 0", name="ck_processing_jobs_max_attempts_positive"),
         Index(
             "uq_processing_jobs_asset_job_type",
@@ -344,6 +355,15 @@ class ProcessingJob(Base):
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dispatch_status: Mapped[JobDispatchStatus | None] = mapped_column(
+        enum_type(JobDispatchStatus), nullable=True
+    )
+    dispatch_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    dispatch_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dispatch_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     progress_stage: Mapped[str | None] = mapped_column(String(64), nullable=True)
     progress_completed: Mapped[int | None] = mapped_column(Integer, nullable=True)
     progress_total: Mapped[int | None] = mapped_column(Integer, nullable=True)

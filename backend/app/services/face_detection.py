@@ -50,7 +50,7 @@ def detect_face_focus(
             )
             observations.append(FaceObservation(timestamp_ms, faces))
     except Exception:
-        logger.warning("Face sampling failed; using center crop.", exc_info=True)
+        logger.warning("Face sampling failed; using center crop.")
         return None
     finally:
         capture.release()

@@ -9,6 +9,7 @@ import {
   getTranscript,
   getTranscriptionStatus,
   requestTranscription,
+  redispatchJob,
   type Transcript,
   type TranscriptionStatus,
 } from "../lib/api";
@@ -84,6 +85,20 @@ export function TranscriptViewer({ assetId, videoElementId }: { assetId: string;
     }
   }
 
+  async function retryRunner() {
+    if (!status?.job) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await redispatchJob(status.job.id);
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The processing runner could not be restarted.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   function seek(startMs: number) {
     const video = document.getElementById(videoElementId) as HTMLVideoElement | null;
     if (!video) return;
@@ -118,11 +133,12 @@ export function TranscriptViewer({ assetId, videoElementId }: { assetId: string;
           <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> {progressLabel(status)}
         </div>
       )}
-      {(error || status?.job?.error_message) && (
+      {(error || status?.job?.error_message || status?.job?.dispatch_error_message) && (
         <div className="mt-4 flex gap-2 rounded-lg border border-red-400/15 bg-red-400/[0.04] p-3 text-xs leading-5 text-red-200">
-          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {error ?? status?.job?.error_message}
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {error ?? status?.job?.error_message ?? status?.job?.dispatch_error_message}
         </div>
       )}
+      {active && status?.job?.dispatch_error_message && <Button className="mt-3" type="button" size="sm" variant="secondary" onClick={() => void retryRunner()} disabled={submitting}><RefreshCw className="h-3.5 w-3.5" /> Retry runner</Button>}
 
       {transcript && (
         <div className="mt-5">

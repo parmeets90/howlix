@@ -35,6 +35,7 @@ from app.schemas import (
     UploadSessionResponse,
 )
 from app.services.storage import StorageError, StorageService, UploadedPart, get_storage_service
+from app.services.github_dispatch import dispatch_job
 from app.services.quotas import QuotaExceededError, release_storage, reserve_storage
 from app.services.upload_policy import (
     UploadPolicyError,
@@ -288,6 +289,7 @@ def complete_upload(
     payload: CompleteUploadRequest,
     db: Session = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
+    settings: Settings = Depends(get_settings),
     user: AuthenticatedUser = Depends(require_user),
 ) -> UploadCompletionResponse:
     session = _get_session(db, session_id, user.id, lock=True)
@@ -376,6 +378,7 @@ def complete_upload(
     db.refresh(session)
     db.refresh(asset)
     db.refresh(job)
+    dispatch_job(db, job.id, settings, owner_id=user.id)
     return UploadCompletionResponse(
         session=upload_session_response(session),
         asset_id=asset.id,

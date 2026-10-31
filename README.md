@@ -16,6 +16,12 @@ howlix/
 └── docs/       # Architecture, roadmap, and milestone notes
 ```
 
+For the zero-cost private-beta API topology, exact Render/Vercel settings, and
+the local Windows worker procedure, see the
+[Render Free deployment guide](docs/render-free-deployment.md).
+For ephemeral private-beta processing, see the
+[GitHub Actions on-demand worker guide](docs/github-actions-worker.md).
+
 ## Prerequisites (Windows 64-bit)
 
 - Node.js 20.9 or newer and npm
