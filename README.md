@@ -2,9 +2,9 @@
 
 **Find the moments worth watching.**
 
-Howlix is an AI-powered video clipping product by Wolvesgang Digital. This repository contains the ingestion, transcription, moment-discovery, and Milestone 5 rendering pipeline: a polished Next.js workspace, FastAPI APIs, Supabase Postgres metadata, private Cloudflare R2 media, word-timestamp transcription, reviewed AI recommendations, and FFmpeg-rendered downloadable MP4 clips.
+Howlix is an AI-powered video clipping product by Wolvesgang Digital. This repository contains the authenticated private-beta pipeline: Supabase Auth, owner-scoped FastAPI APIs, durable quotas, private Cloudflare R2 media, word-timestamp transcription, reviewed AI recommendations, and FFmpeg-rendered MP4 clips.
 
-> This remains a single-user environment with no application authentication. Production-domain configuration is prepared for `howlix.wolvesgang.digital`, but the dashboard and API must stay behind a private access gate until authentication and authorization are implemented.
+> Milestone 6 adds application authentication and cross-user isolation, but it is a limited private-beta foundation, not a claim of production security. Keep both application hosts behind a private access gate until deployment hardening and an independent security review are complete.
 
 ## Repository layout
 
@@ -60,6 +60,8 @@ Copy-Item .env.example .env
 
 Open the Supabase dashboard, select the project, click **Connect**, choose the **Session pooler** connection for reliable IPv4 development, and place that URI in the root `.env` as `HOWLIX_DATABASE_URL`. Replace the password placeholder and retain `sslmode=require`. Password characters such as `@`, `#`, `?`, or spaces must be URL-encoded. Keep `HOWLIX_DATABASE_SCHEMA=howlix`; this isolates Howlix from other applications sharing the Supabase project. Then add credentials scoped to the separate private `howlix-media` R2 bucket as described in [Cloudflare R2 setup](docs/cloudflare-r2-setup.md).
 
+In Supabase Auth, enable email/password sign-in and email confirmation. Add `http://localhost:3000/auth/callback` and the production callback to the redirect allowlist. Configure `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` for the backend plus the matching `NEXT_PUBLIC_*` values for the frontend. A publishable key is designed for browser use; a service-role or secret key is not used by Howlix and must never be placed in frontend configuration. Prefer Supabase asymmetric signing keys with `SUPABASE_JWT_VERIFICATION_MODE=jwks`. Legacy HS256 projects can use `auth-server` verification while migrating.
+
 For cloud transcription and moment analysis, create a Groq API key and set `GROQ_API_KEY` in the root `.env`. It is read only by FastAPI and the worker. `TRANSCRIPTION_PROVIDER=groq`, `GROQ_TRANSCRIPTION_MODEL=whisper-large-v3-turbo`, and `GROQ_MOMENT_MODEL=openai/gpt-oss-20b` are the defaults. Never place the key in a `NEXT_PUBLIC_*` variable. Moment analysis sends timestamped transcript excerpts and metadata, never video bytes.
 
 Then apply the schema:
@@ -70,6 +72,16 @@ cd backend
 python -m alembic upgrade head
 cd ..
 ```
+
+Migration `20261031_0006` leaves pre-authentication records unowned and inaccessible. After creating and verifying the correct Supabase user, preview an explicit ownership claim, then apply it:
+
+```powershell
+cd backend
+python -m scripts.claim_legacy_projects --user-id "SUPABASE-USER-UUID" --project-id "EXISTING-PROJECT-UUID"
+python -m scripts.claim_legacy_projects --user-id "SUPABASE-USER-UUID" --project-id "EXISTING-PROJECT-UUID" --apply
+```
+
+The command never guesses an owner and requires every project UUID explicitly.
 
 If PowerShell blocks virtual-environment activation, use this for the current process and retry activation:
 
@@ -82,10 +94,11 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```powershell
 cd frontend
 npm install
+Copy-Item .env.example .env.local
 cd ..
 ```
 
-The Supabase URI is a backend secret. Never put it in `NEXT_PUBLIC_*` variables or commit `.env`. Local ports default to 3000 and 8000. For a different frontend API URL, copy `NEXT_PUBLIC_API_URL` into `frontend/.env.local`.
+The Supabase database URI is a backend secret. The Supabase project URL and publishable key are public client configuration, while database, R2, Groq, and any Supabase secret/service-role keys remain backend-only. Never commit `.env`. Local ports default to 3000 and 8000.
 
 ## Run Howlix
 
@@ -213,14 +226,22 @@ Implemented:
 - Minimal, bold, and karaoke ASS captions driven by real transcript-word timestamps
 - Actual FFmpeg progress, cancellation, retries, NVENC probing, and libx264 fallback
 - Private R2 export history with short-lived preview and download URLs
+- Supabase email/password signup, verification, login, recovery, logout, and SSR sessions
+- FastAPI JWT signature/issuer/audience/expiry validation and owner-scoped object access
+- Cross-user isolation for projects, media, uploads, transcripts, moments, jobs, and exports
+- Durable per-user project, storage, transcription, analysis, and render quotas
+- Account usage dashboard and explicit legacy-data ownership claim workflow
+- Permission-confirmed YouTube URL imports through durable, owner-scoped worker jobs
 
 Not implemented:
 
-- Authentication, billing, or public deployment
+- Billing, social publishing, or unrestricted public deployment
 
 Media validation runs as a background worker, but distributed job infrastructure is intentionally not introduced yet.
 
-See [the architecture](docs/architecture.md), [Cloudflare R2 setup](docs/cloudflare-r2-setup.md), [Supabase setup](docs/supabase.md), [roadmap](docs/roadmap.md), [Milestone 4 notes](docs/milestone-4.md), and [Milestone 5 notes](docs/milestone-5.md) for more detail.
+YouTube imports require `yt-dlp` from `backend/requirements.txt` plus FFmpeg/FFprobe. They accept one public watch, Shorts, live, or youtu.be URL only after ownership or permission confirmation. Private, restricted, authenticated, DRM-protected, and unavailable media fall back to manual upload. See [youtube-imports.md](docs/youtube-imports.md).
+
+See [the architecture](docs/architecture.md), [security model](docs/security-model.md), [Cloudflare R2 setup](docs/cloudflare-r2-setup.md), [roadmap](docs/roadmap.md), and [Milestone 6 notes](docs/milestone-6.md) for more detail.
 
 Production URL and Git-connected deployment preparation are documented in [deployment.md](docs/deployment.md). The intended layout is `https://howlix.wolvesgang.digital` for Next.js and `https://api.howlix.wolvesgang.digital` for FastAPI.
 

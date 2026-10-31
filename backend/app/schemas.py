@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 import uuid
 
@@ -18,6 +18,7 @@ from app.models import (
     ProjectStatus,
     TranscriptStatus,
     UploadSessionStatus,
+    YouTubeImportStatus,
 )
 
 
@@ -112,6 +113,17 @@ class UploadCompletionResponse(BaseModel):
     validation_job_id: uuid.UUID | None
 
 
+class YouTubeImportCreateRequest(BaseModel):
+    url: str = Field(min_length=1, max_length=500)
+    permission_confirmed: bool
+
+    @model_validator(mode="after")
+    def permission_is_required(self) -> "YouTubeImportCreateRequest":
+        if not self.permission_confirmed:
+            raise ValueError("Confirm that you own this video or have permission to process it.")
+        return self
+
+
 class ProcessingJobSummary(BaseModel):
     id: uuid.UUID
     status: ProcessingJobStatus
@@ -123,6 +135,25 @@ class ProcessingJobSummary(BaseModel):
     progress_total: int | None
     started_at: datetime | None
     finished_at: datetime | None
+
+
+class YouTubeImportResponse(BaseModel):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    asset_id: uuid.UUID
+    source_url: str
+    canonical_url: str
+    video_id: str
+    status: YouTubeImportStatus
+    title: str | None
+    channel_name: str | None
+    source_duration_seconds: float | None
+    error_message: str | None
+    permission_confirmed_at: datetime
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+    job: ProcessingJobSummary | None
 
 
 class MediaAssetResponse(BaseModel):
@@ -312,4 +343,23 @@ class ErrorDetail(BaseModel):
 
 class ErrorResponse(BaseModel):
     error: ErrorDetail
+
+
+class AccountResponse(BaseModel):
+    user_id: uuid.UUID
+    email: str | None
+
+
+class UsageResponse(BaseModel):
+    projects_used: int
+    projects_limit: int
+    stored_media_bytes: int
+    stored_media_limit_bytes: int
+    transcription_seconds: int
+    transcription_limit_seconds: int
+    analysis_jobs: int
+    analysis_jobs_limit: int
+    concurrent_renders: int
+    concurrent_renders_limit: int
+    period_start: date
 

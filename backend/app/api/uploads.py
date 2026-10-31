@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.responses import upload_session_response
+from app.auth import AuthenticatedUser, require_user
 from app.config import Settings, get_settings
 from app.database import get_db
 from app.models import (
@@ -34,6 +35,7 @@ from app.schemas import (
     UploadSessionResponse,
 )
 from app.services.storage import StorageError, StorageService, UploadedPart, get_storage_service
+from app.services.quotas import QuotaExceededError, release_storage, reserve_storage
 from app.services.upload_policy import (
     UploadPolicyError,
     calculate_total_parts,
@@ -77,8 +79,12 @@ def _as_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
 
-def _get_session(db: Session, session_id: uuid.UUID, lock: bool = False) -> UploadSession:
-    statement = select(UploadSession).where(UploadSession.id == session_id)
+def _get_session(
+    db: Session, session_id: uuid.UUID, owner_id: uuid.UUID, lock: bool = False
+) -> UploadSession:
+    statement = select(UploadSession).where(
+        UploadSession.id == session_id, UploadSession.owner_id == owner_id
+    )
     if lock:
         statement = statement.with_for_update()
     session = db.scalar(statement)
@@ -88,7 +94,12 @@ def _get_session(db: Session, session_id: uuid.UUID, lock: bool = False) -> Uplo
 
 
 def _get_asset(db: Session, session: UploadSession) -> MediaAsset:
-    asset = db.get(MediaAsset, session.asset_id)
+    asset = db.scalar(
+        select(MediaAsset).where(
+            MediaAsset.id == session.asset_id,
+            MediaAsset.owner_id == session.owner_id,
+        )
+    )
     if asset is None:
         raise HTTPException(status_code=404, detail="Media asset not found")
     return asset
@@ -116,11 +127,14 @@ def initiate_upload(
     db: Session = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
     settings: Settings = Depends(get_settings),
+    user: AuthenticatedUser = Depends(require_user),
 ) -> UploadInitiateResponse:
     _enforce_rate_limit(
         request, "upload-initiate", settings.upload_init_rate_limit_per_minute
     )
-    if db.get(Project, project_id) is None:
+    if db.scalar(
+        select(Project).where(Project.id == project_id, Project.owner_id == user.id)
+    ) is None:
         raise HTTPException(status_code=404, detail="Project not found")
     if payload.file_size_bytes > settings.max_upload_size_bytes:
         raise HTTPException(
@@ -140,11 +154,16 @@ def initiate_upload(
     used_bytes = db.scalar(
         select(func.coalesce(func.sum(MediaAsset.file_size_bytes), 0)).where(
             MediaAsset.project_id == project_id,
+            MediaAsset.owner_id == user.id,
             MediaAsset.status.in_(ACTIVE_ASSET_STATUSES),
         )
     )
     if int(used_bytes or 0) + payload.file_size_bytes > settings.max_project_storage_bytes:
         raise HTTPException(status_code=409, detail="This project has reached its storage quota.")
+    try:
+        reserve_storage(db, user.id, payload.file_size_bytes, settings)
+    except QuotaExceededError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
 
     asset_id = uuid.uuid4()
     object_key = make_object_key(project_id, asset_id, extension)
@@ -152,7 +171,11 @@ def initiate_upload(
         r2_upload_id = storage.create_multipart_upload(
             object_key,
             payload.mime_type.lower(),
-            {"project-id": str(project_id), "asset-id": str(asset_id)},
+            {
+                "project-id": str(project_id),
+                "asset-id": str(asset_id),
+                "owner-id": str(user.id),
+            },
         )
     except StorageError as exc:
         raise HTTPException(status_code=502, detail="Could not create the R2 upload.") from exc
@@ -160,6 +183,7 @@ def initiate_upload(
     now = utc_now()
     asset = MediaAsset(
         id=asset_id,
+        owner_id=user.id,
         project_id=project_id,
         original_filename=filename,
         object_key=object_key,
@@ -169,6 +193,7 @@ def initiate_upload(
         status=MediaAssetStatus.PENDING_UPLOAD,
     )
     session = UploadSession(
+        owner_id=user.id,
         asset_id=asset_id,
         r2_upload_id=r2_upload_id,
         status=UploadSessionStatus.INITIATED,
@@ -200,9 +225,10 @@ def sign_upload_part(
     db: Session = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
     settings: Settings = Depends(get_settings),
+    user: AuthenticatedUser = Depends(require_user),
 ) -> UploadPartSignResponse:
     _enforce_rate_limit(request, "upload-sign", settings.upload_sign_rate_limit_per_minute)
-    session = _get_session(db, session_id, lock=True)
+    session = _get_session(db, session_id, user.id, lock=True)
     _active_session_or_error(session)
     asset = _get_asset(db, session)
     total_parts = calculate_total_parts(
@@ -237,8 +263,9 @@ def list_upload_parts(
     session_id: uuid.UUID,
     db: Session = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
+    user: AuthenticatedUser = Depends(require_user),
 ) -> UploadedPartsResponse:
-    session = _get_session(db, session_id)
+    session = _get_session(db, session_id, user.id)
     if session.status == UploadSessionStatus.COMPLETED:
         return UploadedPartsResponse(session_id=session.id, parts=[])
     _active_session_or_error(session)
@@ -261,12 +288,14 @@ def complete_upload(
     payload: CompleteUploadRequest,
     db: Session = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
+    user: AuthenticatedUser = Depends(require_user),
 ) -> UploadCompletionResponse:
-    session = _get_session(db, session_id, lock=True)
+    session = _get_session(db, session_id, user.id, lock=True)
     asset = _get_asset(db, session)
     existing_job = db.scalar(
         select(ProcessingJob).where(
             ProcessingJob.asset_id == asset.id,
+            ProcessingJob.owner_id == user.id,
             ProcessingJob.job_type == ProcessingJobType.VALIDATE_MEDIA,
         )
     )
@@ -326,6 +355,7 @@ def complete_upload(
             pass
         session.status = UploadSessionStatus.FAILED
         asset.status = MediaAssetStatus.FAILED
+        release_storage(db, user.id, asset.file_size_bytes)
         db.commit()
         raise HTTPException(status_code=409, detail="The completed R2 object size is incorrect.")
 
@@ -333,6 +363,7 @@ def complete_upload(
     session.completed_at = utc_now()
     asset.status = MediaAssetStatus.UPLOADED
     job = existing_job or ProcessingJob(
+        owner_id=user.id,
         asset_id=asset.id,
         job_type=ProcessingJobType.VALIDATE_MEDIA,
         status=ProcessingJobStatus.QUEUED,
@@ -358,8 +389,9 @@ def abort_upload(
     session_id: uuid.UUID,
     db: Session = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
+    user: AuthenticatedUser = Depends(require_user),
 ) -> UploadSessionResponse:
-    session = _get_session(db, session_id, lock=True)
+    session = _get_session(db, session_id, user.id, lock=True)
     asset = _get_asset(db, session)
     if session.status in (UploadSessionStatus.ABORTED, UploadSessionStatus.EXPIRED):
         return upload_session_response(session)
@@ -372,6 +404,7 @@ def abort_upload(
             raise HTTPException(status_code=502, detail="Could not abort the R2 upload.") from exc
     session.status = UploadSessionStatus.ABORTED
     asset.status = MediaAssetStatus.ABORTED
+    release_storage(db, user.id, asset.file_size_bytes)
     db.commit()
     db.refresh(session)
     return upload_session_response(session)
@@ -379,6 +412,8 @@ def abort_upload(
 
 @router.get("/uploads/{session_id}", response_model=UploadSessionResponse)
 def get_upload_session(
-    session_id: uuid.UUID, db: Session = Depends(get_db)
+    session_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(require_user),
 ) -> UploadSessionResponse:
-    return upload_session_response(_get_session(db, session_id))
+    return upload_session_response(_get_session(db, session_id, user.id))

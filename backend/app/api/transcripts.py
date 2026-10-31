@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.responses import job_summary
+from app.auth import AuthenticatedUser, require_user
 from app.config import Settings, get_settings
 from app.database import get_db
 from app.models import (
@@ -26,6 +27,7 @@ from app.schemas import (
     TranscriptionStatusResponse,
     TranscriptWordResponse,
 )
+from app.services.quotas import QuotaExceededError, consume_transcription
 
 
 router = APIRouter(tags=["transcription"])
@@ -65,10 +67,12 @@ def _transcript_response(transcript: Transcript) -> TranscriptResponse:
     )
 
 
-def _get_transcript(db: Session, asset_id: uuid.UUID) -> Transcript | None:
+def _get_transcript(
+    db: Session, asset_id: uuid.UUID, owner_id: uuid.UUID
+) -> Transcript | None:
     return db.scalar(
         select(Transcript)
-        .where(Transcript.asset_id == asset_id)
+        .where(Transcript.asset_id == asset_id, Transcript.owner_id == owner_id)
         .options(
             selectinload(Transcript.segments),
             selectinload(Transcript.words),
@@ -76,10 +80,11 @@ def _get_transcript(db: Session, asset_id: uuid.UUID) -> Transcript | None:
     )
 
 
-def _get_job(db: Session, asset_id: uuid.UUID) -> ProcessingJob | None:
+def _get_job(db: Session, asset_id: uuid.UUID, owner_id: uuid.UUID) -> ProcessingJob | None:
     return db.scalar(
         select(ProcessingJob).where(
             ProcessingJob.asset_id == asset_id,
+            ProcessingJob.owner_id == owner_id,
             ProcessingJob.job_type == ProcessingJobType.TRANSCRIBE_MEDIA,
         )
     )
@@ -94,8 +99,11 @@ def request_transcription(
     asset_id: uuid.UUID,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    user: AuthenticatedUser = Depends(require_user),
 ) -> TranscriptionStatusResponse:
-    asset = db.get(MediaAsset, asset_id)
+    asset = db.scalar(
+        select(MediaAsset).where(MediaAsset.id == asset_id, MediaAsset.owner_id == user.id)
+    )
     if asset is None:
         raise HTTPException(status_code=404, detail="Media asset not found")
     if asset.status != MediaAssetStatus.READY:
@@ -105,8 +113,8 @@ def request_transcription(
     if settings.transcription_provider == "groq" and settings.groq_api_key is None:
         raise HTTPException(status_code=503, detail="GROQ_API_KEY is not configured.")
 
-    transcript = _get_transcript(db, asset_id)
-    job = _get_job(db, asset_id)
+    transcript = _get_transcript(db, asset_id, user.id)
+    job = _get_job(db, asset_id, user.id)
     provider = settings.transcription_provider
     model = (
         settings.groq_transcription_model
@@ -114,7 +122,12 @@ def request_transcription(
         else settings.faster_whisper_model
     )
     if transcript is None:
+        try:
+            consume_transcription(db, user.id, asset.duration_seconds or 0, settings)
+        except QuotaExceededError as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
         transcript = Transcript(
+            owner_id=user.id,
             asset_id=asset_id,
             provider=provider,
             model=model,
@@ -135,6 +148,7 @@ def request_transcription(
 
     if job is None:
         job = ProcessingJob(
+            owner_id=user.id,
             asset_id=asset_id,
             job_type=ProcessingJobType.TRANSCRIBE_MEDIA,
             status=ProcessingJobStatus.QUEUED,
@@ -162,10 +176,16 @@ def request_transcription(
 
 
 @router.get("/media/{asset_id}/transcript", response_model=TranscriptResponse)
-def get_transcript(asset_id: uuid.UUID, db: Session = Depends(get_db)) -> TranscriptResponse:
-    if db.get(MediaAsset, asset_id) is None:
+def get_transcript(
+    asset_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(require_user),
+) -> TranscriptResponse:
+    if db.scalar(
+        select(MediaAsset).where(MediaAsset.id == asset_id, MediaAsset.owner_id == user.id)
+    ) is None:
         raise HTTPException(status_code=404, detail="Media asset not found")
-    transcript = _get_transcript(db, asset_id)
+    transcript = _get_transcript(db, asset_id, user.id)
     if transcript is None:
         raise HTTPException(status_code=404, detail="Transcript not found")
     return _transcript_response(transcript)
@@ -176,12 +196,16 @@ def get_transcript(asset_id: uuid.UUID, db: Session = Depends(get_db)) -> Transc
     response_model=TranscriptionStatusResponse,
 )
 def get_transcription_status(
-    asset_id: uuid.UUID, db: Session = Depends(get_db)
+    asset_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(require_user),
 ) -> TranscriptionStatusResponse:
-    if db.get(MediaAsset, asset_id) is None:
+    if db.scalar(
+        select(MediaAsset).where(MediaAsset.id == asset_id, MediaAsset.owner_id == user.id)
+    ) is None:
         raise HTTPException(status_code=404, detail="Media asset not found")
-    transcript = _get_transcript(db, asset_id)
-    job = _get_job(db, asset_id)
+    transcript = _get_transcript(db, asset_id, user.id)
+    job = _get_job(db, asset_id, user.id)
     return TranscriptionStatusResponse(
         asset_id=asset_id,
         transcript_id=transcript.id if transcript else None,

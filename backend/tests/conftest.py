@@ -3,15 +3,17 @@ from __future__ import annotations
 from collections.abc import Generator
 import os
 from pathlib import Path
+import uuid
 
 os.environ.setdefault("HOWLIX_DATABASE_URL", "sqlite:///:memory:")
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import Base, get_db
+from app.auth import AuthenticatedUser, require_user
 from app.main import app
 from app.rate_limit import upload_rate_limiter
 from app.services.storage import (
@@ -20,6 +22,10 @@ from app.services.storage import (
     UploadedPart,
     get_storage_service,
 )
+
+
+TEST_USER_ID = uuid.UUID("11111111-1111-4111-8111-111111111111")
+SECOND_USER_ID = uuid.UUID("22222222-2222-4222-8222-222222222222")
 
 
 class MockStorageService:
@@ -114,7 +120,21 @@ def testing_session_factory(tmp_path):
         f"sqlite:///{database_path.as_posix()}",
         connect_args={"check_same_thread": False},
     )
-    testing_session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    class OwnedTestSession(Session):
+        pass
+
+    @event.listens_for(OwnedTestSession, "before_flush")
+    def assign_default_test_owner(session, flush_context, instances):  # noqa: ARG001
+        for value in session.new:
+            if hasattr(value, "owner_id") and value.owner_id is None:
+                value.owner_id = TEST_USER_ID
+
+    testing_session = sessionmaker(
+        bind=engine,
+        class_=OwnedTestSession,
+        autoflush=False,
+        expire_on_commit=False,
+    )
     Base.metadata.create_all(bind=engine)
 
     yield testing_session
@@ -142,6 +162,9 @@ def client(
 
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_storage_service] = lambda: mock_storage
+    app.dependency_overrides[require_user] = lambda: AuthenticatedUser(
+        TEST_USER_ID, "user-a@example.test", "authenticated"
+    )
     upload_rate_limiter.reset()
     with TestClient(app) as test_client:
         yield test_client

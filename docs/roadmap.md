@@ -52,14 +52,34 @@ Status: implemented in this repository.
 
 The local worker renders one job at a time, prefers a working NVENC encoder, and falls back to bounded-thread libx264. Exports remain private in R2. Scene-aware cutting is deferred because approved moment boundaries already define the clip and automatic extra cuts could change editorial meaning.
 
-## Milestone 6 — Editing and delivery refinement
+## Milestone 6 — Secure private beta foundation
+
+Status: implemented in this repository.
+
+- Supabase email/password authentication and SSR sessions
+- Verified bearer JWTs and owner-scoped FastAPI authorization
+- Private signed storage access after authorization
+- Durable beta quotas and account usage display
+- Explicit legacy-record ownership claims and cross-user isolation tests
+
+## Milestone 7 — Editing and delivery refinement
 
 - Better face tracking and multi-speaker composition controls
 - Per-word caption editing and reusable brand presets
 - Export quality comparison, thumbnails, and final editorial polish
-- Authentication and authorization before any public access
+- Security hardening, audit trails, and dependency review before wider access
 
 ## Later product work
 
-Authentication, multi-tenancy, production worker hosting/queues, observability, subscriptions, and team collaboration belong after the core clipping workflow is proven.
+Production security review, multi-tenant teams, observability, subscriptions, social delivery, and wider public access remain later work.
+
+## Additive ingestion: YouTube URL import
+
+Status: implemented behind private-beta authentication.
+
+- Upload/YouTube source selector with the multipart uploader unchanged
+- Strict single-video URL validation and permission confirmation
+- Durable yt-dlp jobs with quotas, cancellation, retries, cleanup, and private R2 storage
+- Reuse of validation, transcription, discovery, and rendering workflows
+- Live import remains opt-in and must use an authorized, permission-cleared source
 

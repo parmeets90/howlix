@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 const navigation = [
   { href: "/dashboard", label: "Projects", icon: LayoutGrid, exact: true },
   { href: "/dashboard/new", label: "New project", icon: Plus, exact: false },
+  { href: "/dashboard/account", label: "Account & usage", icon: Settings, exact: false },
 ];
 
 export function Sidebar() {
@@ -28,8 +29,8 @@ export function Sidebar() {
         })}
       </nav>
       <div className="mt-auto rounded-xl border border-white/[0.07] bg-white/[0.025] p-4">
-        <div className="flex items-center gap-2 text-xs font-medium text-zinc-300"><Settings className="h-3.5 w-3.5" /> Local workspace</div>
-        <p className="mt-2 text-xs leading-5 text-zinc-600">Single-user development mode. Authentication is not enabled.</p>
+        <div className="flex items-center gap-2 text-xs font-medium text-zinc-300"><Settings className="h-3.5 w-3.5" /> Private beta</div>
+        <p className="mt-2 text-xs leading-5 text-zinc-600">Authenticated workspace with private per-user media.</p>
       </div>
       <p className="px-2 pt-5 text-[11px] text-zinc-700">Wolvesgang Digital</p>
     </aside>

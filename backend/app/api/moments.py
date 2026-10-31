@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.responses import job_summary
+from app.auth import AuthenticatedUser, require_user
 from app.config import Settings, get_settings
 from app.database import get_db
 from app.models import (
@@ -28,24 +29,33 @@ from app.schemas import (
     MomentReviewRequest,
     MomentUpdateRequest,
 )
+from app.services.quotas import QuotaExceededError, consume_analysis
 
 
 router = APIRouter(tags=["moment discovery"])
 
 
-def _analysis_job(db: Session, asset_id: uuid.UUID) -> ProcessingJob | None:
+def _analysis_job(
+    db: Session, asset_id: uuid.UUID, owner_id: uuid.UUID
+) -> ProcessingJob | None:
     return db.scalar(
         select(ProcessingJob).where(
             ProcessingJob.asset_id == asset_id,
+            ProcessingJob.owner_id == owner_id,
             ProcessingJob.job_type == ProcessingJobType.MOMENT_DISCOVERY,
         )
     )
 
 
-def _latest_run(db: Session, asset_id: uuid.UUID) -> MomentAnalysisRun | None:
+def _latest_run(
+    db: Session, asset_id: uuid.UUID, owner_id: uuid.UUID
+) -> MomentAnalysisRun | None:
     return db.scalar(
         select(MomentAnalysisRun)
-        .where(MomentAnalysisRun.asset_id == asset_id)
+        .where(
+            MomentAnalysisRun.asset_id == asset_id,
+            MomentAnalysisRun.owner_id == owner_id,
+        )
         .options(selectinload(MomentAnalysisRun.candidates))
         .order_by(MomentAnalysisRun.created_at.desc())
         .limit(1)
@@ -66,7 +76,7 @@ def _analysis_response(db: Session, run: MomentAnalysisRun) -> MomentAnalysisRes
         usage=run.usage_json,
         error_message=run.error_message,
         recommendation_count=len(run.candidates),
-        job=job_summary(_analysis_job(db, run.asset_id)),
+        job=job_summary(_analysis_job(db, run.asset_id, run.owner_id)),
         created_at=run.created_at,
         completed_at=run.completed_at,
     )
@@ -75,7 +85,10 @@ def _analysis_response(db: Session, run: MomentAnalysisRun) -> MomentAnalysisRes
 def _excerpt(db: Session, candidate: MomentCandidate) -> str:
     transcript = db.scalar(
         select(Transcript)
-        .where(Transcript.id == candidate.analysis_run.transcript_id)
+        .where(
+            Transcript.id == candidate.analysis_run.transcript_id,
+            Transcript.owner_id == candidate.owner_id,
+        )
         .options(selectinload(Transcript.segments))
     )
     if transcript is None:
@@ -114,10 +127,12 @@ def _candidate_response(db: Session, candidate: MomentCandidate) -> MomentCandid
     )
 
 
-def _load_candidate(db: Session, moment_id: uuid.UUID) -> MomentCandidate:
+def _load_candidate(
+    db: Session, moment_id: uuid.UUID, owner_id: uuid.UUID
+) -> MomentCandidate:
     candidate = db.scalar(
         select(MomentCandidate)
-        .where(MomentCandidate.id == moment_id)
+        .where(MomentCandidate.id == moment_id, MomentCandidate.owner_id == owner_id)
         .options(selectinload(MomentCandidate.analysis_run))
     )
     if candidate is None:
@@ -134,13 +149,20 @@ def discover_moments(
     asset_id: uuid.UUID,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    user: AuthenticatedUser = Depends(require_user),
 ) -> MomentAnalysisResponse:
-    asset = db.get(MediaAsset, asset_id)
+    asset = db.scalar(
+        select(MediaAsset).where(MediaAsset.id == asset_id, MediaAsset.owner_id == user.id)
+    )
     if asset is None:
         raise HTTPException(status_code=404, detail="Media asset not found")
     if asset.status != MediaAssetStatus.READY:
         raise HTTPException(status_code=409, detail="Media must be ready before moment discovery.")
-    transcript = db.scalar(select(Transcript).where(Transcript.asset_id == asset_id))
+    transcript = db.scalar(
+        select(Transcript).where(
+            Transcript.asset_id == asset_id, Transcript.owner_id == user.id
+        )
+    )
     if transcript is None or transcript.status != TranscriptStatus.COMPLETED:
         raise HTTPException(status_code=409, detail="A completed transcript is required.")
     if settings.moment_analysis_provider == "groq" and settings.groq_api_key is None:
@@ -150,6 +172,7 @@ def discover_moments(
         select(MomentAnalysisRun)
         .where(
             MomentAnalysisRun.asset_id == asset_id,
+            MomentAnalysisRun.owner_id == user.id,
             MomentAnalysisRun.transcript_id == transcript.id,
             MomentAnalysisRun.analysis_version == settings.moment_analysis_version,
             MomentAnalysisRun.prompt_version == settings.moment_prompt_version,
@@ -159,7 +182,12 @@ def discover_moments(
     provider = settings.moment_analysis_provider
     model = settings.groq_moment_model if provider == "groq" else "deterministic-v1"
     if run is None:
+        try:
+            consume_analysis(db, user.id, settings)
+        except QuotaExceededError as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
         run = MomentAnalysisRun(
+            owner_id=user.id,
             asset_id=asset_id,
             transcript_id=transcript.id,
             status=MomentAnalysisStatus.QUEUED,
@@ -186,9 +214,10 @@ def discover_moments(
         run.provider = provider
         run.model = model
 
-    job = _analysis_job(db, asset_id)
+    job = _analysis_job(db, asset_id, user.id)
     if job is None:
         job = ProcessingJob(
+            owner_id=user.id,
             asset_id=asset_id,
             job_type=ProcessingJobType.MOMENT_DISCOVERY,
             status=ProcessingJobStatus.QUEUED,
@@ -210,11 +239,15 @@ def discover_moments(
 
 @router.get("/media/{asset_id}/moment-analysis", response_model=MomentAnalysisResponse)
 def get_moment_analysis(
-    asset_id: uuid.UUID, db: Session = Depends(get_db)
+    asset_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(require_user),
 ) -> MomentAnalysisResponse:
-    if db.get(MediaAsset, asset_id) is None:
+    if db.scalar(
+        select(MediaAsset).where(MediaAsset.id == asset_id, MediaAsset.owner_id == user.id)
+    ) is None:
         raise HTTPException(status_code=404, detail="Media asset not found")
-    run = _latest_run(db, asset_id)
+    run = _latest_run(db, asset_id, user.id)
     if run is None:
         raise HTTPException(status_code=404, detail="Moment analysis not found")
     return _analysis_response(db, run)
@@ -225,15 +258,21 @@ def list_moments(
     asset_id: uuid.UUID,
     review_status: MomentReviewStatus | None = Query(default=None),
     db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(require_user),
 ) -> list[MomentCandidateResponse]:
-    if db.get(MediaAsset, asset_id) is None:
+    if db.scalar(
+        select(MediaAsset).where(MediaAsset.id == asset_id, MediaAsset.owner_id == user.id)
+    ) is None:
         raise HTTPException(status_code=404, detail="Media asset not found")
-    run = _latest_run(db, asset_id)
+    run = _latest_run(db, asset_id, user.id)
     if run is None:
         return []
     statement = (
         select(MomentCandidate)
-        .where(MomentCandidate.analysis_run_id == run.id)
+        .where(
+            MomentCandidate.analysis_run_id == run.id,
+            MomentCandidate.owner_id == user.id,
+        )
         .options(selectinload(MomentCandidate.analysis_run))
         .order_by(MomentCandidate.rank.asc())
     )
@@ -243,8 +282,12 @@ def list_moments(
 
 
 @router.get("/moments/{moment_id}", response_model=MomentCandidateResponse)
-def get_moment(moment_id: uuid.UUID, db: Session = Depends(get_db)) -> MomentCandidateResponse:
-    return _candidate_response(db, _load_candidate(db, moment_id))
+def get_moment(
+    moment_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(require_user),
+) -> MomentCandidateResponse:
+    return _candidate_response(db, _load_candidate(db, moment_id, user.id))
 
 
 def _validate_boundaries(
@@ -254,10 +297,18 @@ def _validate_boundaries(
     end_ms: int,
     settings: Settings,
 ) -> None:
-    asset = db.get(MediaAsset, candidate.asset_id)
+    asset = db.scalar(
+        select(MediaAsset).where(
+            MediaAsset.id == candidate.asset_id,
+            MediaAsset.owner_id == candidate.owner_id,
+        )
+    )
     transcript = db.scalar(
         select(Transcript)
-        .where(Transcript.id == candidate.analysis_run.transcript_id)
+        .where(
+            Transcript.id == candidate.analysis_run.transcript_id,
+            Transcript.owner_id == candidate.owner_id,
+        )
         .options(selectinload(Transcript.segments))
     )
     if asset is None or transcript is None or asset.duration_seconds is None:
@@ -291,8 +342,9 @@ def update_moment(
     payload: MomentUpdateRequest,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    user: AuthenticatedUser = Depends(require_user),
 ) -> MomentCandidateResponse:
-    candidate = _load_candidate(db, moment_id)
+    candidate = _load_candidate(db, moment_id, user.id)
     if payload.reset_boundaries:
         start_ms, end_ms = candidate.ai_start_ms, candidate.ai_end_ms
     else:
@@ -313,8 +365,9 @@ def review_moment(
     moment_id: uuid.UUID,
     payload: MomentReviewRequest,
     db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(require_user),
 ) -> MomentCandidateResponse:
-    candidate = _load_candidate(db, moment_id)
+    candidate = _load_candidate(db, moment_id, user.id)
     candidate.review_status = payload.review_status
     db.commit()
     db.refresh(candidate)

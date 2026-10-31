@@ -1,6 +1,6 @@
 [project]
 name = "howlix-backend"
-version = "0.5.0"
+version = "0.6.0"
 description = "Howlix API and durable media analysis and rendering worker"
 requires-python = ">=3.11"
 

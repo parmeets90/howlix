@@ -33,6 +33,8 @@ from app.models import (
     TranscriptWord,
     UploadSession,
     UploadSessionStatus,
+    YouTubeImport,
+    YouTubeImportStatus,
     utc_now,
 )
 from app.services.media_probe import (
@@ -72,6 +74,7 @@ from app.services.rendering import (
     render_with_fallback,
     select_encoder,
 )
+from app.services.quotas import release_storage, reserve_storage
 from app.services.subtitles import CaptionStyle, build_ass_document, write_ass_file
 from app.services.audio_preprocessing import AudioPreprocessingError, extract_audio_chunks
 from app.services.transcription import (
@@ -81,6 +84,15 @@ from app.services.transcription import (
     TransientTranscriptionError,
     get_transcription_provider,
     merge_chunk_results,
+)
+from app.services.youtube_import import (
+    YtDlpDownloader,
+    YouTubeDownloader,
+    YouTubeImportCancelled,
+    YouTubeImportError,
+    YouTubeImportLimitError,
+    YouTubeImportUnavailable,
+    ValidatedYouTubeUrl,
 )
 
 
@@ -96,6 +108,7 @@ def claim_next_job(
         exhausted = list(
             db.scalars(
                 select(ProcessingJob).where(
+                    ProcessingJob.owner_id.is_not(None),
                     ProcessingJob.status == ProcessingJobStatus.PROCESSING,
                     ProcessingJob.lease_expires_at < now,
                     ProcessingJob.attempts >= ProcessingJob.max_attempts,
@@ -110,14 +123,20 @@ def claim_next_job(
             job.error_message = job.error_message or "Job lease expired after all attempts."
             if job.job_type == ProcessingJobType.TRANSCRIBE_MEDIA:
                 transcript = db.scalar(
-                    select(Transcript).where(Transcript.asset_id == job.asset_id)
+                    select(Transcript).where(
+                        Transcript.asset_id == job.asset_id,
+                        Transcript.owner_id == job.owner_id,
+                    )
                 )
                 if transcript is not None:
                     transcript.status = TranscriptStatus.FAILED
             elif job.job_type == ProcessingJobType.MOMENT_DISCOVERY:
                 run = db.scalar(
                     select(MomentAnalysisRun)
-                    .where(MomentAnalysisRun.asset_id == job.asset_id)
+                    .where(
+                        MomentAnalysisRun.asset_id == job.asset_id,
+                        MomentAnalysisRun.owner_id == job.owner_id,
+                    )
                     .order_by(MomentAnalysisRun.created_at.desc())
                     .limit(1)
                 )
@@ -130,11 +149,26 @@ def claim_next_job(
                     export.status = ClipExportStatus.FAILED
                     export.error_message = job.error_message
                     export.completed_at = now
+            elif job.job_type == ProcessingJobType.YOUTUBE_IMPORT:
+                value = db.scalar(
+                    select(YouTubeImport).where(
+                        YouTubeImport.asset_id == job.asset_id,
+                        YouTubeImport.owner_id == job.owner_id,
+                    )
+                )
+                if value is not None:
+                    value.status = YouTubeImportStatus.FAILED
+                    value.error_message = job.error_message
+                    value.completed_at = now
+                    if value.reservation_active:
+                        release_storage(db, value.owner_id, value.reserved_bytes)
+                        value.reservation_active = False
 
         active_render = db.scalar(
             select(ProcessingJob.id)
             .where(
                 ProcessingJob.job_type == ProcessingJobType.CLIP_RENDER,
+                ProcessingJob.owner_id.is_not(None),
                 ProcessingJob.status == ProcessingJobStatus.PROCESSING,
                 ProcessingJob.lease_expires_at >= now,
             )
@@ -145,6 +179,7 @@ def claim_next_job(
             select(ProcessingJob)
             .where(
                 ProcessingJob.attempts < ProcessingJob.max_attempts,
+                ProcessingJob.owner_id.is_not(None),
                 or_(
                     ProcessingJob.status == ProcessingJobStatus.QUEUED,
                     (
@@ -232,6 +267,7 @@ class MediaValidationWorker:
         face_focus_detector=detect_face_focus,
         export_validator=validate_export,
         export_uploader=upload_export,
+        youtube_downloader: YouTubeDownloader | None = None,
         worker_id: str | None = None,
     ) -> None:
         self.settings = settings
@@ -245,6 +281,7 @@ class MediaValidationWorker:
         self.face_focus_detector = face_focus_detector
         self.export_validator = export_validator
         self.export_uploader = export_uploader
+        self.youtube_downloader = youtube_downloader or YtDlpDownloader()
         self.worker_id = worker_id or f"worker-{uuid.uuid4().hex[:12]}"
 
     def cleanup_expired_uploads(self) -> int:
@@ -275,6 +312,7 @@ class MediaValidationWorker:
                         continue
                 session.status = UploadSessionStatus.EXPIRED
                 asset.status = MediaAssetStatus.ABORTED
+                release_storage(db, asset.owner_id, asset.file_size_bytes)
                 cleaned += 1
             db.commit()
         return cleaned
@@ -293,6 +331,8 @@ class MediaValidationWorker:
             self._process_moment_discovery_job(job_id)
         elif job_type == ProcessingJobType.CLIP_RENDER:
             self._process_clip_render_job(job_id)
+        elif job_type == ProcessingJobType.YOUTUBE_IMPORT:
+            self._process_youtube_import_job(job_id)
         else:
             self._process_validation_job(job_id)
         return True
@@ -303,6 +343,8 @@ class MediaValidationWorker:
             if job is None or job.claimed_by != self.worker_id:
                 return
             asset = db.get(MediaAsset, job.asset_id)
+            if asset is not None and asset.owner_id != job.owner_id:
+                asset = None
             if asset is None:
                 self._finish_infrastructure_failure(db, job, None, "Media asset is missing.")
                 return
@@ -364,6 +406,8 @@ class MediaValidationWorker:
                 if job is None or asset is None:
                     return
                 asset.status = MediaAssetStatus.REJECTED
+                if deletion_error is None:
+                    release_storage(db, asset.owner_id, asset.file_size_bytes)
                 job.status = ProcessingJobStatus.SUCCEEDED
                 job.error_message = f"{exc}{deletion_error or ''}"
                 job.finished_at = utc_now()
@@ -432,14 +476,266 @@ class MediaValidationWorker:
             job.progress_total = total
             db.commit()
 
+    def _youtube_cancelled(self, import_id: uuid.UUID) -> bool:
+        with self.session_factory() as db:
+            value = db.get(YouTubeImport, import_id)
+            if value is None or value.status == YouTubeImportStatus.CANCELLED:
+                return True
+            job = db.scalar(
+                select(ProcessingJob).where(
+                    ProcessingJob.asset_id == value.asset_id,
+                    ProcessingJob.job_type == ProcessingJobType.YOUTUBE_IMPORT,
+                )
+            )
+            return job is None or job.status == ProcessingJobStatus.CANCELLED
+
+    def _cleanup_import_object(self, object_key: str) -> None:
+        try:
+            self.storage.delete_object(object_key)
+        except StorageError as exc:
+            if exc.code not in {"NoSuchKey", "404", "10024"}:
+                logger.warning("Could not clean incomplete YouTube import object %s", object_key)
+
+    def _process_youtube_import_job(self, job_id: uuid.UUID) -> None:
+        with self.session_factory() as db:
+            job = db.get(ProcessingJob, job_id)
+            if job is None or job.claimed_by != self.worker_id:
+                return
+            asset = db.get(MediaAsset, job.asset_id)
+            value = db.scalar(
+                select(YouTubeImport).where(
+                    YouTubeImport.asset_id == job.asset_id,
+                    YouTubeImport.owner_id == job.owner_id,
+                )
+            )
+            if asset is None or value is None or asset.owner_id != job.owner_id:
+                self._finish_infrastructure_failure(db, job, asset, "YouTube import state is missing.")
+                return
+            if value.status == YouTubeImportStatus.COMPLETED:
+                self._mark_job_succeeded(job)
+                db.commit()
+                return
+            if value.status == YouTubeImportStatus.CANCELLED:
+                job.status = ProcessingJobStatus.CANCELLED
+                job.claimed_by = None
+                job.lease_expires_at = None
+                job.finished_at = utc_now()
+                db.commit()
+                return
+            value.status = YouTubeImportStatus.PROCESSING
+            value.started_at = value.started_at or utc_now()
+            value.error_message = None
+            asset.status = MediaAssetStatus.IMPORTING
+            job.progress_stage = "resolving_youtube"
+            import_id = value.id
+            object_key = asset.object_key
+            validated = ValidatedYouTubeUrl(value.source_url, value.canonical_url, value.video_id)
+            db.commit()
+
+        temp_root = self.settings.processing_temp_dir
+        if temp_root is not None:
+            temp_root = temp_root.resolve()
+            temp_root.mkdir(parents=True, exist_ok=True)
+        uploaded = False
+        try:
+            with LeaseHeartbeat(
+                self.session_factory, job_id, self.worker_id, self.settings.job_lease_seconds
+            ):
+                with tempfile.TemporaryDirectory(
+                    prefix="howlix-youtube-", dir=str(temp_root) if temp_root else None
+                ) as temp_directory:
+                    self._set_progress(job_id, "downloading_youtube")
+                    downloaded = self.youtube_downloader.download(
+                        validated,
+                        Path(temp_directory),
+                        maximum_bytes=min(
+                            self.settings.youtube_import_max_bytes,
+                            self.settings.max_upload_size_mb * 1024 * 1024,
+                        ),
+                        maximum_duration_seconds=self.settings.max_video_duration_seconds,
+                        timeout_seconds=self.settings.youtube_import_timeout_seconds,
+                        progress=lambda completed, total: self._set_progress(
+                            job_id, "downloading_youtube", completed, total
+                        ),
+                        cancelled=lambda: self._youtube_cancelled(import_id),
+                    )
+                    if self._youtube_cancelled(import_id):
+                        raise YouTubeImportCancelled("YouTube import was cancelled.")
+                    self._set_progress(job_id, "probing_youtube")
+                    metadata = self.probe(
+                        downloaded.path,
+                        self.settings.ffprobe_path,
+                        self.settings.ffprobe_timeout_seconds,
+                        self.settings.max_video_duration_seconds,
+                    )
+                    actual_size = downloaded.path.stat().st_size
+                    if actual_size <= 0 or actual_size > self.settings.youtube_import_max_bytes:
+                        raise YouTubeImportLimitError(
+                            "The downloaded video exceeds this workspace's import size limit."
+                        )
+                    self._set_progress(job_id, "uploading_to_private_storage", actual_size, actual_size)
+                    self._cleanup_import_object(object_key)
+                    self.storage.upload_object(
+                        object_key,
+                        downloaded.path,
+                        "video/mp4",
+                        {
+                            "source": "youtube",
+                            "youtube-video-id": validated.video_id,
+                            "howlix-import-id": str(import_id),
+                        },
+                    )
+                    uploaded = True
+                    head = self.storage.head_object(object_key)
+                    if head.content_length != actual_size:
+                        raise StorageError("R2 import upload size verification failed.")
+                    if self._youtube_cancelled(import_id):
+                        raise YouTubeImportCancelled("YouTube import was cancelled.")
+
+            with self.session_factory() as db:
+                job = db.get(ProcessingJob, job_id)
+                value = db.get(YouTubeImport, import_id)
+                asset = db.get(MediaAsset, job.asset_id) if job else None
+                if job is None or value is None or asset is None or job.claimed_by != self.worker_id:
+                    return
+                if value.status == YouTubeImportStatus.CANCELLED:
+                    raise YouTubeImportCancelled("YouTube import was cancelled.")
+                asset.file_size_bytes = actual_size
+                asset.duration_seconds = metadata.duration_seconds
+                asset.width = metadata.width
+                asset.height = metadata.height
+                asset.frame_rate = metadata.frame_rate
+                asset.video_codec = metadata.video_codec
+                asset.audio_codec = metadata.audio_codec
+                asset.container_format = metadata.container_format
+                asset.status = MediaAssetStatus.UPLOADED
+                value.title = downloaded.title
+                value.channel_name = downloaded.channel_name
+                value.channel_id = downloaded.channel_id
+                value.published_at = downloaded.published_at
+                value.source_duration_seconds = downloaded.duration_seconds
+                value.extractor = downloaded.extractor
+                value.status = YouTubeImportStatus.COMPLETED
+                value.error_message = None
+                value.completed_at = utc_now()
+                if value.reservation_active:
+                    release_storage(db, value.owner_id, max(0, value.reserved_bytes - actual_size))
+                    value.reservation_active = False
+                validation_job = db.scalar(
+                    select(ProcessingJob).where(
+                        ProcessingJob.asset_id == asset.id,
+                        ProcessingJob.job_type == ProcessingJobType.VALIDATE_MEDIA,
+                    )
+                )
+                if validation_job is None:
+                    db.add(
+                        ProcessingJob(
+                            owner_id=value.owner_id,
+                            asset_id=asset.id,
+                            job_type=ProcessingJobType.VALIDATE_MEDIA,
+                            status=ProcessingJobStatus.QUEUED,
+                            max_attempts=3,
+                            progress_stage="queued",
+                        )
+                    )
+                self._mark_job_succeeded(job)
+                job.progress_completed = actual_size
+                job.progress_total = actual_size
+                db.commit()
+        except YouTubeImportCancelled as exc:
+            if uploaded:
+                self._cleanup_import_object(object_key)
+            with self.session_factory() as db:
+                job = db.get(ProcessingJob, job_id)
+                value = db.get(YouTubeImport, import_id)
+                asset = db.get(MediaAsset, job.asset_id) if job else None
+                if value is not None and value.reservation_active:
+                    release_storage(db, value.owner_id, value.reserved_bytes)
+                    value.reservation_active = False
+                if value is not None:
+                    value.status = YouTubeImportStatus.CANCELLED
+                    value.error_message = str(exc)
+                    value.completed_at = utc_now()
+                if asset is not None:
+                    asset.status = MediaAssetStatus.ABORTED
+                if job is not None:
+                    job.status = ProcessingJobStatus.CANCELLED
+                    job.error_message = str(exc)
+                    job.progress_stage = "cancelled"
+                    job.claimed_by = None
+                    job.lease_expires_at = None
+                    job.finished_at = utc_now()
+                db.commit()
+        except (YouTubeImportUnavailable, YouTubeImportLimitError, MediaValidationError) as exc:
+            if uploaded:
+                self._cleanup_import_object(object_key)
+            self._finish_youtube_import_failure(job_id, import_id, str(exc), retryable=False)
+        except (StorageError, MediaProbeError, OSError, YouTubeImportError) as exc:
+            if uploaded:
+                self._cleanup_import_object(object_key)
+            self._finish_youtube_import_failure(job_id, import_id, str(exc), retryable=True)
+        except Exception as exc:
+            logger.exception("Unexpected YouTube import failure for job %s", job_id)
+            if uploaded:
+                self._cleanup_import_object(object_key)
+            self._finish_youtube_import_failure(
+                job_id,
+                import_id,
+                f"Unexpected YouTube import failure: {type(exc).__name__}",
+                retryable=True,
+            )
+
+    def _finish_youtube_import_failure(
+        self, job_id: uuid.UUID, import_id: uuid.UUID, message: str, *, retryable: bool
+    ) -> None:
+        with self.session_factory() as db:
+            job = db.get(ProcessingJob, job_id)
+            value = db.get(YouTubeImport, import_id)
+            asset = db.get(MediaAsset, job.asset_id) if job else None
+            if job is None:
+                return
+            job.error_message = message[:2000]
+            job.claimed_by = None
+            if retryable and job.attempts < job.max_attempts:
+                job.status = ProcessingJobStatus.RETRY
+                job.progress_stage = "retry"
+                job.lease_expires_at = utc_now() + timedelta(
+                    seconds=min(300, 5 * (2 ** max(0, job.attempts - 1)))
+                )
+                if value is not None:
+                    value.status = YouTubeImportStatus.RETRY
+                    value.error_message = message[:2000]
+                if asset is not None:
+                    asset.status = MediaAssetStatus.IMPORTING
+            else:
+                job.status = ProcessingJobStatus.FAILED
+                job.progress_stage = "failed"
+                job.lease_expires_at = None
+                job.finished_at = utc_now()
+                if value is not None:
+                    value.status = YouTubeImportStatus.FAILED
+                    value.error_message = message[:2000]
+                    value.completed_at = utc_now()
+                    if value.reservation_active:
+                        release_storage(db, value.owner_id, value.reserved_bytes)
+                        value.reservation_active = False
+                if asset is not None:
+                    asset.status = MediaAssetStatus.FAILED
+            db.commit()
+
     def _process_transcription_job(self, job_id: uuid.UUID) -> None:
         with self.session_factory() as db:
             job = db.get(ProcessingJob, job_id)
             if job is None or job.claimed_by != self.worker_id:
                 return
             asset = db.get(MediaAsset, job.asset_id)
+            if asset is not None and asset.owner_id != job.owner_id:
+                asset = None
             transcript = db.scalar(
-                select(Transcript).where(Transcript.asset_id == job.asset_id)
+                select(Transcript).where(
+                    Transcript.asset_id == job.asset_id,
+                    Transcript.owner_id == job.owner_id,
+                )
             )
             if asset is None or transcript is None:
                 self._finish_transcription_failure(
@@ -461,7 +757,10 @@ class MediaValidationWorker:
             with self.session_factory() as db:
                 job = db.get(ProcessingJob, job_id)
                 transcript = db.scalar(
-                    select(Transcript).where(Transcript.asset_id == job.asset_id)
+                    select(Transcript).where(
+                        Transcript.asset_id == job.asset_id,
+                        Transcript.owner_id == job.owner_id,
+                    )
                 ) if job else None
                 if job:
                     self._finish_transcription_failure(
@@ -517,7 +816,10 @@ class MediaValidationWorker:
             with self.session_factory() as db:
                 job = db.get(ProcessingJob, job_id)
                 transcript = db.scalar(
-                    select(Transcript).where(Transcript.asset_id == job.asset_id)
+                    select(Transcript).where(
+                        Transcript.asset_id == job.asset_id,
+                        Transcript.owner_id == job.owner_id,
+                    )
                 ) if job else None
                 if job is None or transcript is None or job.claimed_by != self.worker_id:
                     return
@@ -571,7 +873,10 @@ class MediaValidationWorker:
             with self.session_factory() as db:
                 job = db.get(ProcessingJob, job_id)
                 transcript = db.scalar(
-                    select(Transcript).where(Transcript.asset_id == job.asset_id)
+                    select(Transcript).where(
+                        Transcript.asset_id == job.asset_id,
+                        Transcript.owner_id == job.owner_id,
+                    )
                 ) if job else None
                 if job:
                     self._finish_transcription_failure(
@@ -581,7 +886,10 @@ class MediaValidationWorker:
             with self.session_factory() as db:
                 job = db.get(ProcessingJob, job_id)
                 transcript = db.scalar(
-                    select(Transcript).where(Transcript.asset_id == job.asset_id)
+                    select(Transcript).where(
+                        Transcript.asset_id == job.asset_id,
+                        Transcript.owner_id == job.owner_id,
+                    )
                 ) if job else None
                 if job:
                     self._finish_transcription_failure(
@@ -592,7 +900,10 @@ class MediaValidationWorker:
             with self.session_factory() as db:
                 job = db.get(ProcessingJob, job_id)
                 transcript = db.scalar(
-                    select(Transcript).where(Transcript.asset_id == job.asset_id)
+                    select(Transcript).where(
+                        Transcript.asset_id == job.asset_id,
+                        Transcript.owner_id == job.owner_id,
+                    )
                 ) if job else None
                 if job:
                     self._finish_transcription_failure(
@@ -642,15 +953,23 @@ class MediaValidationWorker:
                 return
             run = db.scalar(
                 select(MomentAnalysisRun)
-                .where(MomentAnalysisRun.asset_id == job.asset_id)
+                .where(
+                    MomentAnalysisRun.asset_id == job.asset_id,
+                    MomentAnalysisRun.owner_id == job.owner_id,
+                )
                 .order_by(MomentAnalysisRun.created_at.desc())
                 .limit(1)
             )
             asset = db.get(MediaAsset, job.asset_id)
+            if asset is not None and asset.owner_id != job.owner_id:
+                asset = None
             transcript = (
                 db.scalar(
                     select(Transcript)
-                    .where(Transcript.id == run.transcript_id)
+                    .where(
+                        Transcript.id == run.transcript_id,
+                        Transcript.owner_id == job.owner_id,
+                    )
                     .options(
                         selectinload(Transcript.segments),
                         selectinload(Transcript.words),
@@ -780,6 +1099,7 @@ class MediaValidationWorker:
                     start_ms, end_ms, _window, evaluation, overall, breakdown = item
                     db.add(
                         MomentCandidate(
+                            owner_id=run.owner_id,
                             analysis_run_id=run.id,
                             asset_id=asset_id,
                             start_ms=start_ms,
@@ -885,12 +1205,21 @@ class MediaValidationWorker:
         with self.session_factory() as db:
             job = db.get(ProcessingJob, job_id)
             export = db.get(ClipExport, job.clip_export_id) if job and job.clip_export_id else None
+            if export is not None and export.owner_id != job.owner_id:
+                export = None
             moment = db.get(MomentCandidate, export.moment_id) if export else None
             asset = db.get(MediaAsset, export.asset_id) if export else None
+            if moment is not None and moment.owner_id != job.owner_id:
+                moment = None
+            if asset is not None and asset.owner_id != job.owner_id:
+                asset = None
             transcript = (
                 db.scalar(
                     select(Transcript)
-                    .where(Transcript.asset_id == asset.id)
+                    .where(
+                        Transcript.asset_id == asset.id,
+                        Transcript.owner_id == job.owner_id,
+                    )
                     .options(selectinload(Transcript.words))
                 )
                 if asset is not None
@@ -1083,6 +1412,12 @@ class MediaValidationWorker:
                 export = db.get(ClipExport, export_id)
                 if job is None or export is None or job.claimed_by != self.worker_id:
                     return
+                reserve_storage(
+                    db,
+                    export.owner_id,
+                    validated.file_size_bytes,
+                    self.settings,
+                )
                 export.status = ClipExportStatus.COMPLETED
                 export.file_size_bytes = validated.file_size_bytes
                 export.duration_ms = round(validated.metadata.duration_seconds * 1000)
@@ -1161,12 +1496,13 @@ class MediaValidationWorker:
         if retryable and job.attempts < job.max_attempts:
             job.status = ProcessingJobStatus.RETRY
             job.progress_stage = "retry"
-            job.lease_expires_at = utc_now() + timedelta(
-                seconds=min(
-                    300,
-                    self.settings.render_retry_base_seconds
-                    * (2 ** max(0, job.attempts - 1)),
-                )
+            retry_delay = min(
+                300,
+                self.settings.render_retry_base_seconds
+                * (2 ** max(0, job.attempts - 1)),
+            )
+            job.lease_expires_at = (
+                None if retry_delay <= 0 else utc_now() + timedelta(seconds=retry_delay)
             )
             if export is not None:
                 export.status = ClipExportStatus.RETRY

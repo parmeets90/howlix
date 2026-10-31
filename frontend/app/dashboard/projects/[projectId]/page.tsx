@@ -12,9 +12,12 @@ import {
   LoaderCircle,
   RefreshCw,
   ShieldCheck,
+  UploadCloud,
+  Youtube,
 } from "lucide-react";
 
 import { MultipartUploader } from "@/components/multipart-uploader";
+import { YouTubeImporter } from "@/components/youtube-importer";
 import { TranscriptViewer } from "@/components/transcript-viewer";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,6 +32,7 @@ import { cn, formatFileSize } from "@/lib/utils";
 
 const ACTIVE_STATUSES = new Set<MediaAssetStatus>([
   "pending_upload",
+  "importing",
   "uploading",
   "uploaded",
   "validating",
@@ -65,6 +69,7 @@ export default function ProjectDetailPage() {
   const [media, setMedia] = useState<MediaAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [source, setSource] = useState<"upload" | "youtube">("upload");
 
   async function refresh(showLoading = false) {
     if (showLoading) setLoading(true);
@@ -161,8 +166,14 @@ export default function ProjectDetailPage() {
           </section>
 
           <Card className="mt-8">
-            <CardHeader><CardTitle>Upload another video</CardTitle><CardDescription>Files go directly from this browser to the private Howlix R2 bucket.</CardDescription></CardHeader>
-            <CardContent><MultipartUploader projectId={project.id} onUploadComplete={() => void refresh()} /></CardContent>
+            <CardHeader><CardTitle>Add another video</CardTitle><CardDescription>Upload a file or import a permitted public YouTube video into private storage.</CardDescription></CardHeader>
+            <CardContent>
+              <div role="tablist" aria-label="Video source" className="mb-5 grid gap-3 sm:grid-cols-2">
+                <button type="button" role="tab" aria-selected={source === "upload"} onClick={() => setSource("upload")} className={`rounded-2xl border p-4 text-left transition ${source === "upload" ? "border-violet-400/40 bg-violet-500/10 text-white" : "border-white/[0.07] bg-black/10 text-zinc-500"}`}><UploadCloud className="h-5 w-5 text-violet-300" /><span className="mt-3 block text-sm font-medium">Upload Video</span><span className="mt-1 block text-xs opacity-70">Resumable multipart upload.</span></button>
+                <button type="button" role="tab" aria-selected={source === "youtube"} onClick={() => setSource("youtube")} className={`rounded-2xl border p-4 text-left transition ${source === "youtube" ? "border-violet-400/40 bg-violet-500/10 text-white" : "border-white/[0.07] bg-black/10 text-zinc-500"}`}><Youtube className="h-5 w-5 text-violet-300" /><span className="mt-3 block text-sm font-medium">Paste YouTube URL</span><span className="mt-1 block text-xs opacity-70">Permission-confirmed imports only.</span></button>
+              </div>
+              {source === "upload" ? <MultipartUploader projectId={project.id} onUploadComplete={() => void refresh()} /> : <YouTubeImporter projectId={project.id} onImportChanged={() => void refresh()} />}
+            </CardContent>
           </Card>
         </>
       ) : null}

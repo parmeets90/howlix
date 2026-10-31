@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.responses import job_summary
+from app.auth import AuthenticatedUser, require_user
 from app.config import Settings, get_settings
 from app.database import get_db
 from app.models import (
@@ -30,15 +31,19 @@ from app.services.clip_extraction import ClipBoundaryError, validate_clip_range
 from app.services.export_storage import export_object_key
 from app.services.framing import output_dimensions
 from app.services.storage import StorageError, StorageService, get_storage_service
+from app.services.quotas import QuotaExceededError, enforce_render_concurrency
 
 
 router = APIRouter(tags=["clip exports"])
 RENDER_ENGINE_VERSION = "m5-v1"
 
 
-def _job(db: Session, export_id: uuid.UUID) -> ProcessingJob | None:
+def _job(db: Session, export_id: uuid.UUID, owner_id: uuid.UUID) -> ProcessingJob | None:
     return db.scalar(
-        select(ProcessingJob).where(ProcessingJob.clip_export_id == export_id)
+        select(ProcessingJob).where(
+            ProcessingJob.clip_export_id == export_id,
+            ProcessingJob.owner_id == owner_id,
+        )
     )
 
 
@@ -59,15 +64,17 @@ def _response(db: Session, export: ClipExport) -> ClipExportResponse:
         video_codec=export.video_codec,
         audio_codec=export.audio_codec,
         error_message=export.error_message,
-        job=job_summary(_job(db, export.id)),
+        job=job_summary(_job(db, export.id, export.owner_id)),
         created_at=export.created_at,
         started_at=export.started_at,
         completed_at=export.completed_at,
     )
 
 
-def _load_export(db: Session, export_id: uuid.UUID) -> ClipExport:
-    export = db.get(ClipExport, export_id)
+def _load_export(db: Session, export_id: uuid.UUID, owner_id: uuid.UUID) -> ClipExport:
+    export = db.scalar(
+        select(ClipExport).where(ClipExport.id == export_id, ClipExport.owner_id == owner_id)
+    )
     if export is None:
         raise HTTPException(status_code=404, detail="Clip export not found")
     return export
@@ -83,8 +90,14 @@ def create_export(
     payload: ClipExportCreateRequest,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    user: AuthenticatedUser = Depends(require_user),
 ) -> ClipExportResponse:
-    moment = db.get(MomentCandidate, moment_id)
+    moment = db.scalar(
+        select(MomentCandidate).where(
+            MomentCandidate.id == moment_id,
+            MomentCandidate.owner_id == user.id,
+        )
+    )
     if moment is None:
         raise HTTPException(status_code=404, detail="Moment recommendation not found")
     if moment.review_status != MomentReviewStatus.APPROVED:
@@ -129,15 +142,27 @@ def create_export(
     export = db.scalar(
         select(ClipExport).where(
             ClipExport.moment_id == moment.id,
+            ClipExport.owner_id == user.id,
             ClipExport.settings_hash == settings_hash,
         )
     )
     if export is not None and export.status == ClipExportStatus.COMPLETED:
         return _response(db, export)
+    if export is not None and export.status in {
+        ClipExportStatus.QUEUED,
+        ClipExportStatus.PROCESSING,
+        ClipExportStatus.RETRY,
+    }:
+        return _response(db, export)
+    try:
+        enforce_render_concurrency(db, user.id, settings)
+    except QuotaExceededError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     if export is None:
         export_id = uuid.uuid4()
         export = ClipExport(
             id=export_id,
+            owner_id=user.id,
             moment_id=moment.id,
             asset_id=asset.id,
             status=ClipExportStatus.QUEUED,
@@ -162,9 +187,10 @@ def create_export(
         export.video_codec = None
         export.audio_codec = None
 
-    job = _job(db, export.id)
+    job = _job(db, export.id, user.id)
     if job is None:
         job = ProcessingJob(
+            owner_id=user.id,
             asset_id=asset.id,
             clip_export_id=export.id,
             job_type=ProcessingJobType.CLIP_RENDER,
@@ -194,20 +220,32 @@ def create_export(
 
 
 @router.get("/moments/{moment_id}/exports", response_model=list[ClipExportResponse])
-def list_exports(moment_id: uuid.UUID, db: Session = Depends(get_db)) -> list[ClipExportResponse]:
-    if db.get(MomentCandidate, moment_id) is None:
+def list_exports(
+    moment_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(require_user),
+) -> list[ClipExportResponse]:
+    if db.scalar(
+        select(MomentCandidate).where(
+            MomentCandidate.id == moment_id, MomentCandidate.owner_id == user.id
+        )
+    ) is None:
         raise HTTPException(status_code=404, detail="Moment recommendation not found")
     exports = db.scalars(
         select(ClipExport)
-        .where(ClipExport.moment_id == moment_id)
+        .where(ClipExport.moment_id == moment_id, ClipExport.owner_id == user.id)
         .order_by(ClipExport.created_at.desc())
     )
     return [_response(db, item) for item in exports]
 
 
 @router.get("/exports/{export_id}", response_model=ClipExportResponse)
-def get_export(export_id: uuid.UUID, db: Session = Depends(get_db)) -> ClipExportResponse:
-    return _response(db, _load_export(db, export_id))
+def get_export(
+    export_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(require_user),
+) -> ClipExportResponse:
+    return _response(db, _load_export(db, export_id, user.id))
 
 
 @router.get("/exports/{export_id}/download", response_model=ClipExportDownloadResponse)
@@ -216,8 +254,9 @@ def download_export(
     db: Session = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
     settings: Settings = Depends(get_settings),
+    user: AuthenticatedUser = Depends(require_user),
 ) -> ClipExportDownloadResponse:
-    export = _load_export(db, export_id)
+    export = _load_export(db, export_id, user.id)
     if export.status != ClipExportStatus.COMPLETED or not export.r2_object_key:
         raise HTTPException(status_code=409, detail="Clip export is not ready for download.")
     try:
@@ -237,15 +276,16 @@ def cancel_export(
     export_id: uuid.UUID,
     db: Session = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
+    user: AuthenticatedUser = Depends(require_user),
 ) -> ClipExportResponse:
-    export = _load_export(db, export_id)
+    export = _load_export(db, export_id, user.id)
     if export.status == ClipExportStatus.COMPLETED:
         raise HTTPException(status_code=409, detail="A completed export cannot be cancelled.")
     if export.status != ClipExportStatus.CANCELLED:
         export.status = ClipExportStatus.CANCELLED
         export.error_message = "Cancelled by user."
         export.completed_at = datetime.now(timezone.utc)
-        job = _job(db, export.id)
+        job = _job(db, export.id, user.id)
         if job is not None:
             job.status = ProcessingJobStatus.CANCELLED
             job.error_message = "Cancelled by user."

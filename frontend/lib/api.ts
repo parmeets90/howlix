@@ -1,3 +1,5 @@
+import { createClient } from "@/lib/supabase/client";
+
 export type ProjectStatus = "draft";
 
 export type Project = {
@@ -28,8 +30,9 @@ export class ApiError extends Error {
 }
 
 export type UploadSessionStatus = "initiated" | "uploading" | "completed" | "aborted" | "expired" | "failed";
-export type MediaAssetStatus = "pending_upload" | "uploading" | "uploaded" | "validating" | "ready" | "rejected" | "failed" | "aborted";
-export type ProcessingJobStatus = "queued" | "processing" | "retry" | "succeeded" | "failed";
+export type MediaAssetStatus = "pending_upload" | "importing" | "uploading" | "uploaded" | "validating" | "ready" | "rejected" | "failed" | "aborted";
+export type ProcessingJobStatus = "queued" | "processing" | "retry" | "succeeded" | "failed" | "cancelled";
+export type YouTubeImportStatus = "queued" | "processing" | "retry" | "completed" | "failed" | "cancelled";
 export type TranscriptStatus = "queued" | "processing" | "retry" | "completed" | "failed";
 export type MomentAnalysisStatus = "queued" | "processing" | "retry" | "completed" | "failed";
 export type MomentReviewStatus = "pending" | "approved" | "rejected";
@@ -82,6 +85,25 @@ export type MediaAsset = {
     started_at: string | null;
     finished_at: string | null;
   } | null;
+};
+
+export type YouTubeImport = {
+  id: string;
+  project_id: string;
+  asset_id: string;
+  source_url: string;
+  canonical_url: string;
+  video_id: string;
+  status: YouTubeImportStatus;
+  title: string | null;
+  channel_name: string | null;
+  source_duration_seconds: number | null;
+  error_message: string | null;
+  permission_confirmed_at: string;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  job: MediaAsset["latest_job"];
 };
 
 export type TranscriptSegment = {
@@ -206,13 +228,33 @@ export type ClipExport = {
   completed_at: string | null;
 };
 
+export type Account = { user_id: string; email: string | null };
+export type Usage = {
+  projects_used: number;
+  projects_limit: number;
+  stored_media_bytes: number;
+  stored_media_limit_bytes: number;
+  transcription_seconds: number;
+  transcription_limit_seconds: number;
+  analysis_jobs: number;
+  analysis_jobs_limit: number;
+  concurrent_renders: number;
+  concurrent_renders_limit: number;
+  period_start: string;
+};
+
 const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${API_URL}${path}`, init);
-  } catch {
+    const { data } = await createClient().auth.getSession();
+    if (!data.session?.access_token) throw new ApiError("Your session has expired. Sign in again.", 401);
+    const headers = new Headers(init?.headers);
+    headers.set("Authorization", `Bearer ${data.session.access_token}`);
+    response = await fetch(`${API_URL}${path}`, { ...init, headers });
+  } catch (cause) {
+    if (cause instanceof ApiError) throw cause;
     throw new Error("Could not connect to the Howlix API. Make sure the backend is running.");
   }
 
@@ -230,6 +272,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+export function getAccount(): Promise<Account> {
+  return request<Account>("/api/v1/account", { cache: "no-store" });
+}
+
+export function getUsage(): Promise<Usage> {
+  return request<Usage>("/api/v1/account/usage", { cache: "no-store" });
 }
 
 export function listProjects(): Promise<Project[]> {
@@ -291,6 +341,29 @@ export function abortUpload(sessionId: string): Promise<UploadSession> {
 
 export function getUploadSession(sessionId: string): Promise<UploadSession> {
   return request(`/api/v1/uploads/${sessionId}`, { cache: "no-store" });
+}
+
+export function createYouTubeImport(
+  projectId: string,
+  input: { url: string; permission_confirmed: boolean },
+): Promise<YouTubeImport> {
+  return request(`/api/v1/projects/${projectId}/youtube-imports`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export function listYouTubeImports(projectId: string): Promise<YouTubeImport[]> {
+  return request(`/api/v1/projects/${projectId}/youtube-imports`, { cache: "no-store" });
+}
+
+export function cancelYouTubeImport(importId: string): Promise<YouTubeImport> {
+  return request(`/api/v1/youtube-imports/${importId}/cancel`, { method: "POST" });
+}
+
+export function retryYouTubeImport(importId: string): Promise<YouTubeImport> {
+  return request(`/api/v1/youtube-imports/${importId}/retry`, { method: "POST" });
 }
 
 export function listProjectMedia(projectId: string): Promise<MediaAsset[]> {

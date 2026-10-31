@@ -37,6 +37,25 @@ class Settings(BaseSettings):
         validation_alias="HOWLIX_ALLOWED_HOSTS",
     )
 
+    supabase_url: str | None = Field(default=None, validation_alias="SUPABASE_URL")
+    supabase_publishable_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_KEY"),
+    )
+    supabase_jwt_audience: str = Field(
+        default="authenticated", validation_alias="SUPABASE_JWT_AUDIENCE"
+    )
+    supabase_jwt_issuer: str | None = Field(
+        default=None, validation_alias="SUPABASE_JWT_ISSUER"
+    )
+    supabase_jwks_url: str | None = Field(default=None, validation_alias="SUPABASE_JWKS_URL")
+    supabase_jwt_verification_mode: Literal["jwks", "auth-server"] = Field(
+        default="jwks", validation_alias="SUPABASE_JWT_VERIFICATION_MODE"
+    )
+    auth_http_timeout_seconds: int = Field(
+        default=10, ge=2, le=30, validation_alias="AUTH_HTTP_TIMEOUT_SECONDS"
+    )
+
     r2_account_id: str | None = Field(default=None, validation_alias="R2_ACCOUNT_ID")
     r2_access_key_id: str | None = Field(default=None, validation_alias="R2_ACCESS_KEY_ID")
     r2_secret_access_key: SecretStr | None = Field(
@@ -62,11 +81,41 @@ class Settings(BaseSettings):
     max_project_storage_mb: int = Field(
         default=10240, ge=1, validation_alias="MAX_PROJECT_STORAGE_MB"
     )
+    beta_max_projects_per_user: int = Field(
+        default=10, ge=1, le=1000, validation_alias="BETA_MAX_PROJECTS_PER_USER"
+    )
+    beta_monthly_transcription_minutes: int = Field(
+        default=300, ge=0, validation_alias="BETA_MONTHLY_TRANSCRIPTION_MINUTES"
+    )
+    beta_monthly_analysis_jobs: int = Field(
+        default=100, ge=0, validation_alias="BETA_MONTHLY_ANALYSIS_JOBS"
+    )
+    beta_max_concurrent_renders: int = Field(
+        default=1, ge=1, le=4, validation_alias="BETA_MAX_CONCURRENT_RENDERS"
+    )
+    beta_max_stored_media_mb: int = Field(
+        default=10240, ge=1, validation_alias="BETA_MAX_STORED_MEDIA_MB"
+    )
     upload_init_rate_limit_per_minute: int = Field(
         default=10, ge=1, validation_alias="UPLOAD_INIT_RATE_LIMIT_PER_MINUTE"
     )
     upload_sign_rate_limit_per_minute: int = Field(
         default=120, ge=1, validation_alias="UPLOAD_SIGN_RATE_LIMIT_PER_MINUTE"
+    )
+    youtube_import_enabled: bool = Field(
+        default=True, validation_alias="YOUTUBE_IMPORT_ENABLED"
+    )
+    youtube_import_max_bytes: int = Field(
+        default=1_073_741_824, ge=1_048_576, validation_alias="YOUTUBE_IMPORT_MAX_BYTES"
+    )
+    youtube_import_timeout_seconds: int = Field(
+        default=900, ge=30, le=7200, validation_alias="YOUTUBE_IMPORT_TIMEOUT_SECONDS"
+    )
+    youtube_import_max_concurrent_per_user: int = Field(
+        default=1, ge=1, le=4, validation_alias="YOUTUBE_IMPORT_MAX_CONCURRENT_PER_USER"
+    )
+    youtube_import_max_retries: int = Field(
+        default=3, ge=1, le=6, validation_alias="YOUTUBE_IMPORT_MAX_RETRIES"
     )
 
     ffprobe_path: str = Field(default="ffprobe", validation_alias="FFPROBE_PATH")
@@ -239,6 +288,13 @@ class Settings(BaseSettings):
     def derive_r2_endpoint(self) -> "Settings":
         if not self.r2_endpoint_url and self.r2_account_id:
             self.r2_endpoint_url = f"https://{self.r2_account_id}.r2.cloudflarestorage.com"
+        if self.supabase_url:
+            self.supabase_url = self.supabase_url.rstrip("/")
+            auth_issuer = f"{self.supabase_url}/auth/v1"
+            self.supabase_jwt_issuer = self.supabase_jwt_issuer or auth_issuer
+            self.supabase_jwks_url = (
+                self.supabase_jwks_url or f"{auth_issuer}/.well-known/jwks.json"
+            )
         if self.transcription_chunk_overlap_seconds >= self.transcription_chunk_seconds:
             raise ValueError("Transcription chunk overlap must be shorter than each chunk.")
         if self.moment_min_duration_seconds > self.moment_target_duration_seconds:
@@ -280,6 +336,10 @@ class Settings(BaseSettings):
     @property
     def render_max_output_bytes(self) -> int:
         return self.render_max_output_mb * 1024 * 1024
+
+    @property
+    def beta_max_stored_media_bytes(self) -> int:
+        return self.beta_max_stored_media_mb * 1024 * 1024
 
     def require_r2(self) -> "Settings":
         missing = [

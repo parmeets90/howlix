@@ -21,7 +21,7 @@ Reusing the same cloud accounts does not mean sharing application data:
 
 ## Security gate before deployment
 
-Howlix does not yet implement user authentication or project authorization. Do not expose the dashboard or FastAPI unrestricted on the public Internet. Until application authentication is implemented, protect both hostnames with an identity-aware proxy such as Cloudflare Access, or an equivalent hosting-provider access policy restricted to the owner.
+Howlix now implements Supabase Auth and owner-scoped API authorization, but it has not received an independent security review. For the private beta, protect both hostnames with an identity-aware allowlist such as Cloudflare Access in addition to application login. Do not open unrestricted public signup or traffic yet.
 
 The R2 bucket remains private. Cloudflare Access protects the application hosts, not direct presigned R2 requests; those remain short-lived and object/operation scoped.
 
@@ -41,6 +41,11 @@ R2_BUCKET_NAME=howlix-media
 TRANSCRIPTION_PROVIDER=groq
 GROQ_API_KEY=<hosting-secret>
 NEXT_PUBLIC_API_URL=https://api.howlix.wolvesgang.digital
+SUPABASE_URL=https://PROJECT_REF.supabase.co
+SUPABASE_PUBLISHABLE_KEY=sb_publishable_your_key
+SUPABASE_JWT_VERIFICATION_MODE=jwks
+NEXT_PUBLIC_SUPABASE_URL=https://PROJECT_REF.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_your_key
 ```
 
 Production mode disables FastAPI's interactive OpenAPI/Swagger endpoints. `/health` remains available for platform health checks.
@@ -68,7 +73,7 @@ alembic upgrade head
 alembic current
 ```
 
-Review the pending revisions before `upgrade head`. The first live migration creates only the `howlix` schema and its application tables. Verify the CRM's `public` schema table count and application behavior are unchanged afterward.
+Review pending revisions before `upgrade head`. Revision `20261031_0006` preserves legacy rows with NULL owners. Explicitly claim only known projects for the correct verified user after migration; never bulk-assign an arbitrary owner. Verify the CRM's `public` schema remains unchanged.
 
 ## R2 browser CORS
 
@@ -93,7 +98,7 @@ git ls-files | Select-String -Pattern '(^|/)\.env($|\.)'
 
 Only the non-secret `*.example` environment files should appear.
 
-## Go-live verification
+## Private-beta verification
 
 Run the Milestone 2.5 live test before public traffic:
 
@@ -101,5 +106,6 @@ Run the Milestone 2.5 live test before public traffic:
 2. Verify the separate R2 bucket, multipart operations, HeadObject, signed GET, and exact CORS headers.
 3. Upload a disposable MP4 through the real frontend.
 4. Run the worker and confirm verified metadata and private playback.
-5. Delete the disposable project, rows, object, and incomplete multipart uploads.
-6. Confirm the CRM dashboard and its R2-backed media remain unchanged.
+5. Sign in as a second beta user and prove project, media, upload, moment, job, and export identifiers from user one return 404.
+6. Verify password recovery, email confirmation, logout, access-token expiry, and quota messages.
+7. Confirm the CRM dashboard and its R2-backed media remain unchanged.

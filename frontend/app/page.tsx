@@ -36,7 +36,7 @@ export default function LandingPage() {
           <Link href="#features" className="transition hover:text-white">Product</Link>
         </nav>
         <Button asChild variant="secondary" size="sm">
-          <Link href="/dashboard">Open dashboard <ArrowRight className="h-3.5 w-3.5" /></Link>
+          <Link href="/auth/login">Private beta sign in <ArrowRight className="h-3.5 w-3.5" /></Link>
         </Button>
       </header>
 
@@ -53,7 +53,7 @@ export default function LandingPage() {
         </p>
         <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
           <Button asChild size="lg">
-            <Link href="/dashboard/new">Start Creating <ArrowRight className="h-4 w-4" /></Link>
+            <Link href="/auth/signup">Request beta access <ArrowRight className="h-4 w-4" /></Link>
           </Button>
           <Button asChild variant="ghost" size="lg">
             <Link href="#workflow"><Play className="h-4 w-4" /> See how it works</Link>
@@ -146,7 +146,7 @@ export default function LandingPage() {
           <div className="absolute left-1/2 top-0 -z-10 h-56 w-96 -translate-x-1/2 rounded-full bg-violet-500/20 blur-3xl" />
           <h2 className="text-balance text-3xl font-semibold tracking-[-0.04em] text-white sm:text-5xl">Start with the moments.</h2>
           <p className="mx-auto mt-4 max-w-xl text-zinc-400">Create your first project and securely upload the moments waiting inside.</p>
-          <Button asChild size="lg" className="mt-8"><Link href="/dashboard/new">Start Creating <ArrowRight className="h-4 w-4" /></Link></Button>
+          <Button asChild size="lg" className="mt-8"><Link href="/auth/signup">Create beta account <ArrowRight className="h-4 w-4" /></Link></Button>
         </div>
       </section>
 

@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     Enum,
     Float,
@@ -36,6 +37,7 @@ class ProjectStatus(str, enum.Enum):
 
 class MediaAssetStatus(str, enum.Enum):
     PENDING_UPLOAD = "pending_upload"
+    IMPORTING = "importing"
     UPLOADING = "uploading"
     UPLOADED = "uploaded"
     VALIDATING = "validating"
@@ -54,8 +56,18 @@ class UploadSessionStatus(str, enum.Enum):
     FAILED = "failed"
 
 
+class YouTubeImportStatus(str, enum.Enum):
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    RETRY = "retry"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 class ProcessingJobType(str, enum.Enum):
     VALIDATE_MEDIA = "validate_media"
+    YOUTUBE_IMPORT = "youtube_import"
     TRANSCRIBE_MEDIA = "transcribe_media"
     MOMENT_DISCOVERY = "moment_discovery"
     CLIP_RENDER = "clip_render"
@@ -133,6 +145,7 @@ class Project(Base):
     __tablename__ = "projects"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(160), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[ProjectStatus] = mapped_column(
@@ -161,6 +174,7 @@ class MediaAsset(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)
     project_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
@@ -190,6 +204,9 @@ class MediaAsset(Base):
     upload_sessions: Mapped[list["UploadSession"]] = relationship(
         back_populates="asset", cascade="all, delete-orphan"
     )
+    youtube_import: Mapped["YouTubeImport | None"] = relationship(
+        back_populates="asset", cascade="all, delete-orphan", uselist=False
+    )
     processing_jobs: Mapped[list["ProcessingJob"]] = relationship(
         back_populates="asset", cascade="all, delete-orphan"
     )
@@ -217,6 +234,7 @@ class UploadSession(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)
     asset_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("media_assets.id", ondelete="CASCADE"), nullable=False
     )
@@ -235,6 +253,55 @@ class UploadSession(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     asset: Mapped[MediaAsset] = relationship(back_populates="upload_sessions")
+
+
+class YouTubeImport(Base):
+    __tablename__ = "youtube_imports"
+    __table_args__ = (
+        UniqueConstraint("asset_id", name="uq_youtube_imports_asset_id"),
+        UniqueConstraint(
+            "owner_id", "project_id", "video_id", name="uq_youtube_imports_owner_project_video"
+        ),
+        CheckConstraint("reserved_bytes > 0", name="ck_youtube_imports_reserved_positive"),
+        Index("ix_youtube_imports_owner_status", "owner_id", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    asset_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("media_assets.id", ondelete="CASCADE"), nullable=False
+    )
+    source_url: Mapped[str] = mapped_column(String(512), nullable=False)
+    canonical_url: Mapped[str] = mapped_column(String(512), nullable=False)
+    video_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[YouTubeImportStatus] = mapped_column(
+        enum_type(YouTubeImportStatus), nullable=False, default=YouTubeImportStatus.QUEUED
+    )
+    permission_confirmed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    reserved_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    reservation_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    title: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    channel_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    channel_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    published_at: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    extractor: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    asset: Mapped[MediaAsset] = relationship(back_populates="youtube_import")
 
 
 class ProcessingJob(Base):
@@ -261,6 +328,7 @@ class ProcessingJob(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)
     asset_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("media_assets.id", ondelete="CASCADE"), nullable=False
     )
@@ -304,6 +372,7 @@ class Transcript(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)
     asset_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("media_assets.id", ondelete="CASCADE"), nullable=False
     )
@@ -396,6 +465,7 @@ class MomentAnalysisRun(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)
     asset_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("media_assets.id", ondelete="CASCADE"), nullable=False
     )
@@ -444,6 +514,7 @@ class MomentCandidate(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)
     analysis_run_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("moment_analysis_runs.id", ondelete="CASCADE"), nullable=False
     )
@@ -496,6 +567,7 @@ class ClipExport(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)
     moment_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("moment_candidates.id", ondelete="CASCADE"), nullable=False
     )
@@ -534,5 +606,36 @@ class ClipExport(Base):
     asset: Mapped[MediaAsset] = relationship(back_populates="clip_exports")
     job: Mapped[ProcessingJob | None] = relationship(
         back_populates="clip_export", uselist=False
+    )
+
+
+class UserUsage(Base):
+    __tablename__ = "user_usage"
+    __table_args__ = (
+        CheckConstraint("stored_media_bytes >= 0", name="ck_user_usage_storage_nonnegative"),
+    )
+
+    owner_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    stored_media_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+
+class UserMonthlyUsage(Base):
+    __tablename__ = "user_monthly_usage"
+    __table_args__ = (
+        CheckConstraint(
+            "transcription_seconds >= 0", name="ck_user_monthly_transcription_nonnegative"
+        ),
+        CheckConstraint("analysis_jobs >= 0", name="ck_user_monthly_analysis_nonnegative"),
+    )
+
+    owner_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    period_start: Mapped[date] = mapped_column(Date, primary_key=True)
+    transcription_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    analysis_jobs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
     )
 
