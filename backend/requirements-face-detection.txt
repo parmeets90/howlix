@@ -1,0 +1,2 @@
+# Optional CPU-only face-aware framing. Center crop remains available without it.
+opencv-python-headless>=4.10,<5.0

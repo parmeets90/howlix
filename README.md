@@ -2,7 +2,7 @@
 
 **Find the moments worth watching.**
 
-Howlix is an AI-powered video clipping product by Wolvesgang Digital. This repository contains the verified ingestion, transcription, and Milestone 4 moment-discovery pipeline: a polished Next.js workspace, FastAPI APIs, Supabase Postgres metadata, direct browser-to-Cloudflare-R2 multipart uploads, FFprobe validation, retryable word-timestamp transcription, and transparent AI clip recommendations.
+Howlix is an AI-powered video clipping product by Wolvesgang Digital. This repository contains the ingestion, transcription, moment-discovery, and Milestone 5 rendering pipeline: a polished Next.js workspace, FastAPI APIs, Supabase Postgres metadata, private Cloudflare R2 media, word-timestamp transcription, reviewed AI recommendations, and FFmpeg-rendered downloadable MP4 clips.
 
 > This remains a single-user environment with no application authentication. Production-domain configuration is prepared for `howlix.wolvesgang.digital`, but the dashboard and API must stay behind a private access gate until authentication and authorization are implemented.
 
@@ -38,6 +38,8 @@ Open a new PowerShell window after installation, then verify:
 py -3.12 --version
 ffmpeg -version
 ffprobe -version
+ffmpeg -hide_banner -encoders | Select-String "h264_nvenc|libx264"
+ffmpeg -hide_banner -filters | Select-String "ass"
 ```
 
 ## First-time setup
@@ -105,7 +107,7 @@ cd frontend
 npm run dev
 ```
 
-Validation, transcription, and moment-discovery worker:
+Validation, transcription, moment-discovery, and clip-render worker:
 
 ```powershell
 cd backend
@@ -163,6 +165,16 @@ cd backend
 python -m pytest -m integration tests\test_moment_groq_integration.py
 ```
 
+The real render round trip is opt-in because it downloads an original, encodes a clip, writes to R2, and downloads it again. Use an existing approved moment:
+
+```powershell
+$env:RUN_RENDER_INTEGRATION_TESTS="true"
+$env:RENDER_INTEGRATION_MOMENT_ID="approved-moment-uuid"
+cd backend
+.\.venv\Scripts\Activate.ps1
+python -m pytest -m integration tests\test_render_integration.py -s
+```
+
 Run the offline, version-controlled recommendation evaluation with:
 
 ```powershell
@@ -196,15 +208,19 @@ Implemented:
 - Ranked, deduplicated, topic-diverse recommendations with durable retries and reproducibility metadata
 - Moment review UI with preview-range playback, title/boundary edits, reset, approve, and reject actions
 - Synthetic multilingual evaluation corpus and deterministic quality metrics
+- Approved-moment exports in 9:16, 1:1, or 16:9 at 720p or 1080p
+- Center, optional CPU face-aware, and normalized manual crop framing
+- Minimal, bold, and karaoke ASS captions driven by real transcript-word timestamps
+- Actual FFmpeg progress, cancellation, retries, NVENC probing, and libx264 fallback
+- Private R2 export history with short-lived preview and download URLs
 
 Not implemented:
 
-- Clip generation, cropping, caption rendering, or exports
 - Authentication, billing, or public deployment
 
 Media validation runs as a background worker, but distributed job infrastructure is intentionally not introduced yet.
 
-See [the architecture](docs/architecture.md), [Cloudflare R2 setup](docs/cloudflare-r2-setup.md), [Supabase setup](docs/supabase.md), [roadmap](docs/roadmap.md), [Milestone 3 notes](docs/milestone-3.md), and [Milestone 4 notes](docs/milestone-4.md) for more detail.
+See [the architecture](docs/architecture.md), [Cloudflare R2 setup](docs/cloudflare-r2-setup.md), [Supabase setup](docs/supabase.md), [roadmap](docs/roadmap.md), [Milestone 4 notes](docs/milestone-4.md), and [Milestone 5 notes](docs/milestone-5.md) for more detail.
 
 Production URL and Git-connected deployment preparation are documented in [deployment.md](docs/deployment.md). The intended layout is `https://howlix.wolvesgang.digital` for Next.js and `https://api.howlix.wolvesgang.digital` for FastAPI.
 

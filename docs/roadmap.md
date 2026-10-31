@@ -43,10 +43,21 @@ Status: implemented in this repository.
 
 ## Milestone 5 — Short rendering
 
+Status: implemented in this repository.
+
 - Vertical layouts and FFmpeg rendering
 - Caption styling through libass
-- Face-aware cropping and scene-aware cuts where useful
+- Lightweight face-aware, stable center, and manual cropping
 - Export history and downloadable outputs
+
+The local worker renders one job at a time, prefers a working NVENC encoder, and falls back to bounded-thread libx264. Exports remain private in R2. Scene-aware cutting is deferred because approved moment boundaries already define the clip and automatic extra cuts could change editorial meaning.
+
+## Milestone 6 — Editing and delivery refinement
+
+- Better face tracking and multi-speaker composition controls
+- Per-word caption editing and reusable brand presets
+- Export quality comparison, thumbnails, and final editorial polish
+- Authentication and authorization before any public access
 
 ## Later product work
 

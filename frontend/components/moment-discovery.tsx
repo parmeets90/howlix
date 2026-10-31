@@ -30,6 +30,7 @@ import {
   type MomentReviewStatus,
 } from "../lib/api";
 import { cn } from "../lib/utils";
+import { ClipExports } from "./clip-exports";
 
 
 const ACTIVE_STATUSES = new Set(["queued", "processing", "retry"]);
@@ -138,6 +139,7 @@ export function MomentReviewPanel({
         </div>
         <Button type="button" size="sm" onClick={() => void save()} disabled={saving || !title.trim()}>{saving ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <PencilLine className="h-3.5 w-3.5" />} Save changes</Button>
       </div>
+      {candidate.review_status === "approved" && <ClipExports momentId={candidate.id} />}
     </div>
   );
 }

@@ -60,6 +60,10 @@ class StorageService(Protocol):
 
     def download_object(self, object_key: str, destination: Path) -> None: ...
 
+    def upload_object(
+        self, object_key: str, source: Path, content_type: str, metadata: dict[str, str]
+    ) -> None: ...
+
     def delete_object(self, object_key: str) -> None: ...
 
 
@@ -198,6 +202,21 @@ class R2StorageService:
                 self._client.download_fileobj(self.bucket_name, object_key, output)
         except (OSError, BotoCoreError, ClientError) as exc:
             raise StorageError("R2 object download failed") from exc
+
+    def upload_object(
+        self, object_key: str, source: Path, content_type: str, metadata: dict[str, str]
+    ) -> None:
+        source = source.resolve()
+        try:
+            with source.open("rb") as input_file:
+                self._client.upload_fileobj(
+                    input_file,
+                    self.bucket_name,
+                    object_key,
+                    ExtraArgs={"ContentType": content_type, "Metadata": metadata},
+                )
+        except (OSError, BotoCoreError, ClientError) as exc:
+            raise StorageError("R2 object upload failed") from exc
 
     def delete_object(self, object_key: str) -> None:
         self._call("delete_object", Bucket=self.bucket_name, Key=object_key)

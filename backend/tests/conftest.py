@@ -34,6 +34,7 @@ class MockStorageService:
         self.aborted: list[str] = []
         self.deleted: list[str] = []
         self.completed: list[str] = []
+        self.uploaded_objects: list[str] = []
         self.fail_on: set[str] = set()
         self.forced_head_size: int | None = None
 
@@ -89,6 +90,16 @@ class MockStorageService:
         self._fail("download")
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(self.download_payloads.get(object_key, b"mock-video"))
+
+    def upload_object(
+        self, object_key: str, source: Path, content_type: str, metadata: dict[str, str]
+    ) -> None:
+        del content_type, metadata
+        self._fail("upload-object")
+        payload = source.read_bytes()
+        self.uploaded_objects.append(object_key)
+        self.download_payloads[object_key] = payload
+        self.object_sizes[object_key] = len(payload)
 
     def delete_object(self, object_key: str) -> None:
         self._fail("delete")

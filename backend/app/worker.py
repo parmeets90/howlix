@@ -17,6 +17,10 @@ from app.database import SessionLocal
 from app.models import (
     MediaAsset,
     MediaAssetStatus,
+    CaptionPreset,
+    ClipExport,
+    ClipExportStatus,
+    FramingMode,
     MomentAnalysisRun,
     MomentAnalysisStatus,
     MomentCandidate,
@@ -37,6 +41,16 @@ from app.services.media_probe import (
     MediaValidationError,
     probe_media,
 )
+from app.services.clip_extraction import (
+    ClipBoundaryError,
+    clip_relative_words,
+    validate_clip_range,
+)
+from app.services.export_storage import upload_export
+from app.services.export_validation import ExportValidationError, validate_export
+from app.services.face_detection import detect_face_focus
+from app.services.ffmpeg_commands import RenderCommandOptions
+from app.services.framing import calculate_crop, output_dimensions
 from app.services.moment_discovery import (
     MomentAnalyzer,
     PermanentMomentAnalysisError,
@@ -52,6 +66,13 @@ from app.services.moment_discovery import (
     score_breakdown,
 )
 from app.services.storage import StorageError, StorageService, get_storage_service
+from app.services.rendering import (
+    RenderCancelled,
+    RenderError,
+    render_with_fallback,
+    select_encoder,
+)
+from app.services.subtitles import CaptionStyle, build_ass_document, write_ass_file
 from app.services.audio_preprocessing import AudioPreprocessingError, extract_audio_chunks
 from app.services.transcription import (
     EmptyTranscriptError,
@@ -103,6 +124,22 @@ def claim_next_job(
                 if run is not None:
                     run.status = MomentAnalysisStatus.FAILED
                     run.error_message = job.error_message
+            elif job.job_type == ProcessingJobType.CLIP_RENDER and job.clip_export_id:
+                export = db.get(ClipExport, job.clip_export_id)
+                if export is not None and export.status != ClipExportStatus.CANCELLED:
+                    export.status = ClipExportStatus.FAILED
+                    export.error_message = job.error_message
+                    export.completed_at = now
+
+        active_render = db.scalar(
+            select(ProcessingJob.id)
+            .where(
+                ProcessingJob.job_type == ProcessingJobType.CLIP_RENDER,
+                ProcessingJob.status == ProcessingJobStatus.PROCESSING,
+                ProcessingJob.lease_expires_at >= now,
+            )
+            .limit(1)
+        )
 
         statement = (
             select(ProcessingJob)
@@ -127,6 +164,8 @@ def claim_next_job(
             .with_for_update(skip_locked=True)
             .limit(1)
         )
+        if active_render is not None:
+            statement = statement.where(ProcessingJob.job_type != ProcessingJobType.CLIP_RENDER)
         job = db.scalar(statement)
         if job is None:
             return None
@@ -189,6 +228,10 @@ class MediaValidationWorker:
         transcription_provider: TranscriptionProvider | None = None,
         moment_analyzer: MomentAnalyzer | None = None,
         audio_extractor=extract_audio_chunks,
+        clip_renderer=render_with_fallback,
+        face_focus_detector=detect_face_focus,
+        export_validator=validate_export,
+        export_uploader=upload_export,
         worker_id: str | None = None,
     ) -> None:
         self.settings = settings
@@ -198,6 +241,10 @@ class MediaValidationWorker:
         self.transcription_provider = transcription_provider
         self.moment_analyzer = moment_analyzer
         self.audio_extractor = audio_extractor
+        self.clip_renderer = clip_renderer
+        self.face_focus_detector = face_focus_detector
+        self.export_validator = export_validator
+        self.export_uploader = export_uploader
         self.worker_id = worker_id or f"worker-{uuid.uuid4().hex[:12]}"
 
     def cleanup_expired_uploads(self) -> int:
@@ -244,6 +291,8 @@ class MediaValidationWorker:
             self._process_transcription_job(job_id)
         elif job_type == ProcessingJobType.MOMENT_DISCOVERY:
             self._process_moment_discovery_job(job_id)
+        elif job_type == ProcessingJobType.CLIP_RENDER:
+            self._process_clip_render_job(job_id)
         else:
             self._process_validation_job(job_id)
         return True
@@ -816,6 +865,321 @@ class MediaValidationWorker:
                 run.status = MomentAnalysisStatus.FAILED
                 run.error_message = message[:2000]
                 run.completed_at = utc_now()
+        db.commit()
+
+    def _export_cancelled(self, export_id: uuid.UUID) -> bool:
+        with self.session_factory() as db:
+            export = db.get(ClipExport, export_id)
+            return export is None or export.status == ClipExportStatus.CANCELLED
+
+    def _cleanup_export_object(self, object_key: str | None) -> None:
+        if not object_key:
+            return
+        try:
+            self.storage.delete_object(object_key)
+        except StorageError as exc:
+            if exc.code not in {"NoSuchKey", "404"}:
+                logger.warning("Could not clean incomplete export object %s", object_key)
+
+    def _process_clip_render_job(self, job_id: uuid.UUID) -> None:
+        with self.session_factory() as db:
+            job = db.get(ProcessingJob, job_id)
+            export = db.get(ClipExport, job.clip_export_id) if job and job.clip_export_id else None
+            moment = db.get(MomentCandidate, export.moment_id) if export else None
+            asset = db.get(MediaAsset, export.asset_id) if export else None
+            transcript = (
+                db.scalar(
+                    select(Transcript)
+                    .where(Transcript.asset_id == asset.id)
+                    .options(selectinload(Transcript.words))
+                )
+                if asset is not None
+                else None
+            )
+            if job is None or job.claimed_by != self.worker_id:
+                return
+            if export is not None and export.status == ClipExportStatus.CANCELLED:
+                job.status = ProcessingJobStatus.CANCELLED
+                job.claimed_by = None
+                job.lease_expires_at = None
+                job.finished_at = utc_now()
+                db.commit()
+                return
+            if (
+                export is None
+                or moment is None
+                or asset is None
+                or asset.duration_seconds is None
+                or asset.width is None
+                or asset.height is None
+            ):
+                self._finish_clip_failure(
+                    db, job, export, "Clip export state or source metadata is missing.", retryable=False
+                )
+                return
+            settings_json = dict(export.render_settings_json)
+            try:
+                clip = validate_clip_range(
+                    int(settings_json["source_start_ms"]),
+                    int(settings_json["source_end_ms"]),
+                    source_duration_ms=round(asset.duration_seconds * 1000),
+                    maximum_duration_ms=self.settings.moment_max_duration_seconds * 1000,
+                )
+                output_width, output_height = (
+                    int(value) for value in export.resolution.split("x", 1)
+                )
+            except (KeyError, TypeError, ValueError, ClipBoundaryError) as exc:
+                self._finish_clip_failure(db, job, export, str(exc), retryable=False)
+                return
+            export.status = ClipExportStatus.PROCESSING
+            export.started_at = export.started_at or utc_now()
+            export.completed_at = None
+            export.error_message = None
+            job.progress_stage = "downloading_source"
+            job.progress_completed = 0
+            job.progress_total = clip.duration_ms
+            db.commit()
+            export_id = export.id
+            object_key = export.r2_object_key
+            source_key = asset.object_key
+            source_size = asset.file_size_bytes
+            source_suffix = Path(asset.original_filename).suffix.lower() or ".mp4"
+            source_width, source_height = asset.width, asset.height
+            has_audio = bool(asset.audio_codec)
+            project_id = asset.project_id
+            words = list(transcript.words) if transcript is not None else []
+            framing_mode = export.framing_mode
+            caption_preset = export.caption_preset
+            fps = export.fps
+
+        temp_root = self.settings.processing_temp_dir
+        if temp_root is not None:
+            temp_root = temp_root.resolve()
+            temp_root.mkdir(parents=True, exist_ok=True)
+        try:
+            with LeaseHeartbeat(
+                self.session_factory,
+                job_id,
+                self.worker_id,
+                self.settings.job_lease_seconds,
+            ):
+                with tempfile.TemporaryDirectory(
+                    prefix="howlix-render-", dir=str(temp_root) if temp_root else None
+                ) as temp_directory:
+                    directory = Path(temp_directory).resolve()
+                    source = directory / f"source{source_suffix}"
+                    output = directory / "export.mp4"
+                    self.storage.download_object(source_key, source)
+                    if source.stat().st_size != source_size:
+                        raise RenderError("Downloaded source size does not match its media record.")
+                    if self._export_cancelled(export_id):
+                        raise RenderCancelled("Clip export was cancelled.")
+
+                    self._set_progress(job_id, "determining_framing", 0, clip.duration_ms)
+                    focus_x, focus_y = 0.5, 0.5
+                    face_fallback = False
+                    if framing_mode == FramingMode.MANUAL:
+                        focus_x = float(settings_json["manual_crop_x"])
+                        focus_y = float(settings_json["manual_crop_y"])
+                    elif framing_mode == FramingMode.FACE:
+                        detected = self.face_focus_detector(
+                            source,
+                            start_ms=clip.start_ms,
+                            end_ms=clip.end_ms,
+                            sample_frequency_hz=self.settings.face_sample_frequency_hz,
+                            max_samples=self.settings.face_max_samples,
+                        )
+                        if detected is None:
+                            face_fallback = True
+                        else:
+                            focus_x, focus_y = detected
+                    crop = calculate_crop(
+                        source_width,
+                        source_height,
+                        output_width,
+                        output_height,
+                        focus_x=focus_x,
+                        focus_y=focus_y,
+                    )
+
+                    relative_words = clip_relative_words(words, clip)
+                    captions_filename = None
+                    if caption_preset != CaptionPreset.NONE and relative_words:
+                        self._set_progress(job_id, "generating_captions", 0, clip.duration_ms)
+                        caption_document = build_ass_document(
+                            relative_words,
+                            width=output_width,
+                            height=output_height,
+                            style=CaptionStyle(
+                                preset=caption_preset.value,
+                                font_size=int(settings_json["caption_font_size"]),
+                                text_color=str(settings_json["caption_text_color"]),
+                                highlight_color=str(settings_json["caption_highlight_color"]),
+                                vertical_position=str(settings_json["caption_vertical_position"]),
+                            ),
+                            latin_font=self.settings.caption_latin_font,
+                            complex_font=self.settings.caption_complex_font,
+                        )
+                        captions_path = directory / "captions.ass"
+                        write_ass_file(captions_path, caption_document)
+                        captions_filename = captions_path.name
+
+                    encoder = select_encoder(
+                        self.settings.ffmpeg_path, self.settings.render_prefer_nvenc
+                    )
+                    self._set_progress(job_id, "rendering", 0, clip.duration_ms)
+                    actual_encoder = self.clip_renderer(
+                        RenderCommandOptions(
+                            ffmpeg_path=self.settings.ffmpeg_path,
+                            source=source,
+                            output=output,
+                            clip=clip,
+                            crop=crop,
+                            output_width=output_width,
+                            output_height=output_height,
+                            fps=fps,
+                            encoder=encoder,
+                            cpu_threads=self.settings.render_cpu_threads,
+                            has_audio=has_audio,
+                            captions_filename=captions_filename,
+                            fonts_dir=self.settings.caption_fonts_dir,
+                        ),
+                        timeout_seconds=self.settings.render_timeout_seconds,
+                        progress=lambda completed, total: self._set_progress(
+                            job_id, "rendering", completed, total
+                        ),
+                        cancelled=lambda: self._export_cancelled(export_id),
+                    )
+                    self._set_progress(job_id, "validating_export", clip.duration_ms, clip.duration_ms)
+                    validated = self.export_validator(
+                        output,
+                        ffprobe_path=self.settings.ffprobe_path,
+                        timeout_seconds=self.settings.ffprobe_timeout_seconds,
+                        expected_duration_ms=clip.duration_ms,
+                        expected_width=output_width,
+                        expected_height=output_height,
+                        expected_audio=has_audio,
+                        maximum_size_bytes=self.settings.render_max_output_bytes,
+                    )
+                    if self._export_cancelled(export_id):
+                        raise RenderCancelled("Clip export was cancelled.")
+                    self._set_progress(job_id, "uploading_export", clip.duration_ms, clip.duration_ms)
+                    if not object_key:
+                        raise RenderError("The server-generated export object key is missing.")
+                    self._cleanup_export_object(object_key)
+                    self.export_uploader(
+                        self.storage,
+                        object_key=object_key,
+                        source=output,
+                        project_id=project_id,
+                        export_id=export_id,
+                    )
+                    if self._export_cancelled(export_id):
+                        self._cleanup_export_object(object_key)
+                        raise RenderCancelled("Clip export was cancelled.")
+
+            with self.session_factory() as db:
+                job = db.get(ProcessingJob, job_id)
+                export = db.get(ClipExport, export_id)
+                if job is None or export is None or job.claimed_by != self.worker_id:
+                    return
+                export.status = ClipExportStatus.COMPLETED
+                export.file_size_bytes = validated.file_size_bytes
+                export.duration_ms = round(validated.metadata.duration_seconds * 1000)
+                export.video_codec = validated.metadata.video_codec
+                export.audio_codec = validated.metadata.audio_codec
+                export.error_message = None
+                export.completed_at = utc_now()
+                export.render_settings_json = {
+                    **export.render_settings_json,
+                    "actual_encoder": actual_encoder,
+                    "focus_x": round(focus_x, 4),
+                    "focus_y": round(focus_y, 4),
+                    "face_fallback": face_fallback,
+                }
+                self._mark_job_succeeded(job)
+                job.progress_completed = export.duration_ms
+                job.progress_total = export.duration_ms
+                db.commit()
+        except RenderCancelled as exc:
+            self._cleanup_export_object(object_key)
+            with self.session_factory() as db:
+                job = db.get(ProcessingJob, job_id)
+                export = db.get(ClipExport, export_id)
+                if export is not None:
+                    export.status = ClipExportStatus.CANCELLED
+                    export.error_message = str(exc)
+                    export.completed_at = utc_now()
+                if job is not None:
+                    job.status = ProcessingJobStatus.CANCELLED
+                    job.error_message = str(exc)
+                    job.progress_stage = "cancelled"
+                    job.claimed_by = None
+                    job.lease_expires_at = None
+                    job.finished_at = utc_now()
+                db.commit()
+        except (ClipBoundaryError, ExportValidationError, ValueError) as exc:
+            self._cleanup_export_object(object_key)
+            with self.session_factory() as db:
+                job = db.get(ProcessingJob, job_id)
+                export = db.get(ClipExport, export_id)
+                if job is not None:
+                    self._finish_clip_failure(db, job, export, str(exc), retryable=False)
+        except (RenderError, StorageError, OSError) as exc:
+            self._cleanup_export_object(object_key)
+            with self.session_factory() as db:
+                job = db.get(ProcessingJob, job_id)
+                export = db.get(ClipExport, export_id)
+                if job is not None:
+                    self._finish_clip_failure(db, job, export, str(exc), retryable=True)
+        except Exception as exc:
+            logger.exception("Unexpected clip render failure for job %s", job_id)
+            self._cleanup_export_object(object_key)
+            with self.session_factory() as db:
+                job = db.get(ProcessingJob, job_id)
+                export = db.get(ClipExport, export_id)
+                if job is not None:
+                    self._finish_clip_failure(
+                        db,
+                        job,
+                        export,
+                        f"Unexpected clip render failure: {type(exc).__name__}",
+                        retryable=True,
+                    )
+
+    def _finish_clip_failure(
+        self,
+        db: Session,
+        job: ProcessingJob,
+        export: ClipExport | None,
+        message: str,
+        *,
+        retryable: bool,
+    ) -> None:
+        job.error_message = message[:4000]
+        job.claimed_by = None
+        if retryable and job.attempts < job.max_attempts:
+            job.status = ProcessingJobStatus.RETRY
+            job.progress_stage = "retry"
+            job.lease_expires_at = utc_now() + timedelta(
+                seconds=min(
+                    300,
+                    self.settings.render_retry_base_seconds
+                    * (2 ** max(0, job.attempts - 1)),
+                )
+            )
+            if export is not None:
+                export.status = ClipExportStatus.RETRY
+                export.error_message = message[:4000]
+        else:
+            job.status = ProcessingJobStatus.FAILED
+            job.progress_stage = "failed"
+            job.finished_at = utc_now()
+            job.lease_expires_at = None
+            if export is not None:
+                export.status = ClipExportStatus.FAILED
+                export.error_message = message[:4000]
+                export.completed_at = utc_now()
         db.commit()
 
 

@@ -19,6 +19,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -57,6 +58,7 @@ class ProcessingJobType(str, enum.Enum):
     VALIDATE_MEDIA = "validate_media"
     TRANSCRIBE_MEDIA = "transcribe_media"
     MOMENT_DISCOVERY = "moment_discovery"
+    CLIP_RENDER = "clip_render"
 
 
 class ProcessingJobStatus(str, enum.Enum):
@@ -65,6 +67,7 @@ class ProcessingJobStatus(str, enum.Enum):
     RETRY = "retry"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class TranscriptStatus(str, enum.Enum):
@@ -87,6 +90,34 @@ class MomentReviewStatus(str, enum.Enum):
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
+
+
+class ClipExportStatus(str, enum.Enum):
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    RETRY = "retry"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class ExportAspectRatio(str, enum.Enum):
+    VERTICAL = "9:16"
+    SQUARE = "1:1"
+    LANDSCAPE = "16:9"
+
+
+class CaptionPreset(str, enum.Enum):
+    NONE = "none"
+    MINIMAL = "minimal"
+    BOLD = "bold"
+    KARAOKE = "karaoke"
+
+
+class FramingMode(str, enum.Enum):
+    CENTER = "center"
+    FACE = "face"
+    MANUAL = "manual"
 
 
 def enum_type(enum_class: type[enum.Enum], length: int = 32) -> Enum:
@@ -171,6 +202,9 @@ class MediaAsset(Base):
     moment_candidates: Mapped[list["MomentCandidate"]] = relationship(
         back_populates="asset", cascade="all, delete-orphan"
     )
+    clip_exports: Mapped[list["ClipExport"]] = relationship(
+        back_populates="asset", cascade="all, delete-orphan"
+    )
 
 
 class UploadSession(Base):
@@ -208,13 +242,30 @@ class ProcessingJob(Base):
     __table_args__ = (
         CheckConstraint("attempts >= 0", name="ck_processing_jobs_attempts_nonnegative"),
         CheckConstraint("max_attempts > 0", name="ck_processing_jobs_max_attempts_positive"),
-        UniqueConstraint("asset_id", "job_type", name="uq_processing_jobs_asset_job_type"),
+        Index(
+            "uq_processing_jobs_asset_job_type",
+            "asset_id",
+            "job_type",
+            unique=True,
+            postgresql_where=text("clip_export_id IS NULL"),
+            sqlite_where=text("clip_export_id IS NULL"),
+        ),
+        Index(
+            "uq_processing_jobs_clip_export",
+            "clip_export_id",
+            unique=True,
+            postgresql_where=text("clip_export_id IS NOT NULL"),
+            sqlite_where=text("clip_export_id IS NOT NULL"),
+        ),
         Index("ix_processing_jobs_claim", "status", "lease_expires_at", "created_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     asset_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("media_assets.id", ondelete="CASCADE"), nullable=False
+    )
+    clip_export_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("clip_exports.id", ondelete="CASCADE"), nullable=True
     )
     job_type: Mapped[ProcessingJobType] = mapped_column(
         enum_type(ProcessingJobType), nullable=False
@@ -242,6 +293,7 @@ class ProcessingJob(Base):
     )
 
     asset: Mapped[MediaAsset] = relationship(back_populates="processing_jobs")
+    clip_export: Mapped["ClipExport | None"] = relationship(back_populates="job")
 
 
 class Transcript(Base):
@@ -424,4 +476,63 @@ class MomentCandidate(Base):
 
     analysis_run: Mapped[MomentAnalysisRun] = relationship(back_populates="candidates")
     asset: Mapped[MediaAsset] = relationship(back_populates="moment_candidates")
+    clip_exports: Mapped[list["ClipExport"]] = relationship(
+        back_populates="moment", cascade="all, delete-orphan"
+    )
+
+
+class ClipExport(Base):
+    __tablename__ = "clip_exports"
+    __table_args__ = (
+        CheckConstraint("duration_ms > 0", name="ck_clip_exports_duration"),
+        CheckConstraint("fps > 0 AND fps <= 60", name="ck_clip_exports_fps"),
+        CheckConstraint(
+            "file_size_bytes IS NULL OR file_size_bytes > 0",
+            name="ck_clip_exports_file_size",
+        ),
+        UniqueConstraint("moment_id", "settings_hash", name="uq_clip_exports_settings"),
+        Index("ix_clip_exports_moment_created", "moment_id", "created_at"),
+        Index("ix_clip_exports_asset_status", "asset_id", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    moment_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("moment_candidates.id", ondelete="CASCADE"), nullable=False
+    )
+    asset_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("media_assets.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[ClipExportStatus] = mapped_column(
+        enum_type(ClipExportStatus), nullable=False, default=ClipExportStatus.QUEUED
+    )
+    aspect_ratio: Mapped[ExportAspectRatio] = mapped_column(
+        enum_type(ExportAspectRatio, length=16), nullable=False
+    )
+    resolution: Mapped[str] = mapped_column(String(32), nullable=False)
+    fps: Mapped[float] = mapped_column(Float, nullable=False)
+    caption_preset: Mapped[CaptionPreset] = mapped_column(
+        enum_type(CaptionPreset), nullable=False
+    )
+    framing_mode: Mapped[FramingMode] = mapped_column(
+        enum_type(FramingMode), nullable=False
+    )
+    render_settings_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    settings_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    r2_object_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    file_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    video_codec: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    audio_codec: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    moment: Mapped[MomentCandidate] = relationship(back_populates="clip_exports")
+    asset: Mapped[MediaAsset] = relationship(back_populates="clip_exports")
+    job: Mapped[ProcessingJob | None] = relationship(
+        back_populates="clip_export", uselist=False
+    )
 

@@ -154,11 +154,47 @@ class Settings(BaseSettings):
     moment_prompt_version: str = Field(
         default="m4-v1", min_length=1, max_length=32, validation_alias="MOMENT_PROMPT_VERSION"
     )
+    render_timeout_seconds: int = Field(
+        default=1200, ge=60, le=7200, validation_alias="RENDER_TIMEOUT_SECONDS"
+    )
+    render_cpu_threads: int = Field(
+        default=2, ge=1, le=8, validation_alias="RENDER_CPU_THREADS"
+    )
+    render_prefer_nvenc: bool = Field(
+        default=True, validation_alias="RENDER_PREFER_NVENC"
+    )
+    render_fps_cap: float = Field(
+        default=30.0, ge=15, le=60, validation_alias="RENDER_FPS_CAP"
+    )
+    render_max_output_mb: int = Field(
+        default=500, ge=10, le=2048, validation_alias="RENDER_MAX_OUTPUT_MB"
+    )
+    render_retry_base_seconds: int = Field(
+        default=5, ge=0, le=300, validation_alias="RENDER_RETRY_BASE_SECONDS"
+    )
+    face_sample_frequency_hz: float = Field(
+        default=0.5, ge=0.1, le=2.0, validation_alias="FACE_SAMPLE_FREQUENCY_HZ"
+    )
+    face_max_samples: int = Field(
+        default=60, ge=1, le=300, validation_alias="FACE_MAX_SAMPLES"
+    )
+    caption_fonts_dir: Path | None = Field(
+        default=Path("C:/Windows/Fonts"), validation_alias="CAPTION_FONTS_DIR"
+    )
+    caption_latin_font: str = Field(
+        default="Noto Sans", min_length=1, max_length=128, validation_alias="CAPTION_LATIN_FONT"
+    )
+    caption_complex_font: str = Field(
+        default="Nirmala UI", min_length=1, max_length=128, validation_alias="CAPTION_COMPLEX_FONT"
+    )
     run_groq_integration_tests: bool = Field(
         default=False, validation_alias="RUN_GROQ_INTEGRATION_TESTS"
     )
     run_moment_groq_integration_tests: bool = Field(
         default=False, validation_alias="RUN_MOMENT_GROQ_INTEGRATION_TESTS"
+    )
+    run_render_integration_tests: bool = Field(
+        default=False, validation_alias="RUN_RENDER_INTEGRATION_TESTS"
     )
     groq_integration_audio_path: Path | None = Field(
         default=None, validation_alias="GROQ_INTEGRATION_AUDIO_PATH"
@@ -190,10 +226,14 @@ class Settings(BaseSettings):
     def normalize_public_app_url(cls, value: str) -> str:
         return value.rstrip("/")
 
-    @field_validator("processing_temp_dir", "groq_integration_audio_path", mode="before")
+    @field_validator(
+        "processing_temp_dir", "groq_integration_audio_path", "caption_fonts_dir", mode="before"
+    )
     @classmethod
     def parse_optional_path(cls, value: object) -> object:
-        return None if value == "" else value
+        if value == "":
+            return None
+        return value
 
     @model_validator(mode="after")
     def derive_r2_endpoint(self) -> "Settings":
@@ -236,6 +276,10 @@ class Settings(BaseSettings):
     @property
     def transcription_max_chunk_bytes(self) -> int:
         return self.transcription_max_chunk_mb * 1024 * 1024
+
+    @property
+    def render_max_output_bytes(self) -> int:
+        return self.render_max_output_mb * 1024 * 1024
 
     def require_r2(self) -> "Settings":
         missing = [

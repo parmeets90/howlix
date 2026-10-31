@@ -33,6 +33,10 @@ export type ProcessingJobStatus = "queued" | "processing" | "retry" | "succeeded
 export type TranscriptStatus = "queued" | "processing" | "retry" | "completed" | "failed";
 export type MomentAnalysisStatus = "queued" | "processing" | "retry" | "completed" | "failed";
 export type MomentReviewStatus = "pending" | "approved" | "rejected";
+export type ClipExportStatus = "queued" | "processing" | "retry" | "completed" | "failed" | "cancelled";
+export type ExportAspectRatio = "9:16" | "1:1" | "16:9";
+export type CaptionPreset = "none" | "minimal" | "bold" | "karaoke";
+export type FramingMode = "center" | "face" | "manual";
 
 export type UploadSession = {
   id: string;
@@ -164,6 +168,42 @@ export type MomentCandidate = {
   transcript_excerpt: string;
   created_at: string;
   updated_at: string;
+};
+
+export type ClipExportSettings = {
+  aspect_ratio?: ExportAspectRatio;
+  quality?: "720p" | "1080p";
+  framing_mode?: FramingMode;
+  caption_preset?: CaptionPreset;
+  fps?: number;
+  manual_crop_x?: number;
+  manual_crop_y?: number;
+  caption_font_size?: number;
+  caption_text_color?: string;
+  caption_highlight_color?: string;
+  caption_vertical_position?: "bottom" | "center" | "top";
+};
+
+export type ClipExport = {
+  id: string;
+  moment_id: string;
+  asset_id: string;
+  status: ClipExportStatus;
+  aspect_ratio: ExportAspectRatio;
+  resolution: string;
+  fps: number;
+  caption_preset: CaptionPreset;
+  framing_mode: FramingMode;
+  render_settings: Record<string, unknown>;
+  file_size_bytes: number | null;
+  duration_ms: number;
+  video_codec: string | null;
+  audio_codec: string | null;
+  error_message: string | null;
+  job: MediaAsset["latest_job"];
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
 };
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
@@ -307,5 +347,29 @@ export function reviewMoment(momentId: string, reviewStatus: MomentReviewStatus)
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ review_status: reviewStatus }),
   });
+}
+
+export function createClipExport(momentId: string, settings: ClipExportSettings): Promise<ClipExport> {
+  return request(`/api/v1/moments/${momentId}/exports`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+}
+
+export function listClipExports(momentId: string): Promise<ClipExport[]> {
+  return request(`/api/v1/moments/${momentId}/exports`, { cache: "no-store" });
+}
+
+export function getClipExport(exportId: string): Promise<ClipExport> {
+  return request(`/api/v1/exports/${exportId}`, { cache: "no-store" });
+}
+
+export function getClipExportDownload(exportId: string): Promise<{ export_id: string; download_url: string; expires_at: string }> {
+  return request(`/api/v1/exports/${exportId}/download`, { cache: "no-store" });
+}
+
+export function cancelClipExport(exportId: string): Promise<ClipExport> {
+  return request(`/api/v1/exports/${exportId}/cancel`, { method: "POST" });
 }
 
