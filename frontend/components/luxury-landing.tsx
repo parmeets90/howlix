@@ -29,7 +29,11 @@ const workflow = [
   { number: "03", icon: Scissors, title: "Make it yours", copy: "Approve, fine-tune, frame, caption, and export a polished short." },
 ];
 
-export default function LuxuryLanding() {
+export default function LuxuryLanding({ signedIn = false }: { signedIn?: boolean }) {
+  const accountHref = signedIn ? "/dashboard" : "/auth/login";
+  const accountLabel = signedIn ? "Dashboard" : "Sign in";
+  const primaryHref = signedIn ? "/dashboard" : "/auth/signup";
+  const primaryLabel = signedIn ? "Open dashboard" : "Start creating";
   return (
     <main className="luxury-page overflow-hidden bg-[#070609] text-white">
       <header className="fixed inset-x-0 top-0 z-50 px-4 pt-4 sm:px-6">
@@ -41,7 +45,7 @@ export default function LuxuryLanding() {
             <Link href="#privacy" className="transition hover:text-white">Private by design</Link>
           </nav>
           <Button asChild size="sm" className="rounded-full px-4">
-            <Link href="/auth/login">Sign in <ArrowRight className="h-3.5 w-3.5" /></Link>
+            <Link href={accountHref}>{accountLabel} <ArrowRight className="h-3.5 w-3.5" /></Link>
           </Button>
         </div>
       </header>
@@ -62,7 +66,7 @@ export default function LuxuryLanding() {
             </p>
             <div className="mt-9 flex flex-col gap-3 sm:flex-row">
               <Button asChild size="lg" className="rounded-full px-7">
-                <Link href="/auth/signup">Start creating <ArrowRight className="h-4 w-4" /></Link>
+                <Link href={primaryHref}>{primaryLabel} <ArrowRight className="h-4 w-4" /></Link>
               </Button>
               <Button asChild variant="ghost" size="lg" className="rounded-full border border-white/[0.08] px-7">
                 <Link href="#experience"><Play className="h-4 w-4" /> See the flow</Link>
@@ -164,14 +168,14 @@ export default function LuxuryLanding() {
           <Clapperboard className="mx-auto h-6 w-6 text-violet-300" />
           <h2 className="relative mx-auto mt-6 max-w-3xl text-balance text-4xl font-medium tracking-[-0.055em] sm:text-6xl">The story is already there. <span className="font-serif italic text-violet-200">Find its best cut.</span></h2>
           <p className="relative mx-auto mt-5 max-w-xl text-sm leading-7 text-zinc-400 sm:text-base">Create your first project and turn a long video into something people want to finish.</p>
-          <Button asChild size="lg" className="relative mt-9 rounded-full px-8"><Link href="/auth/signup">Create your free account <ArrowRight className="h-4 w-4" /></Link></Button>
+          <Button asChild size="lg" className="relative mt-9 rounded-full px-8"><Link href={primaryHref}>{signedIn ? "Go to your projects" : "Create your free account"} <ArrowRight className="h-4 w-4" /></Link></Button>
         </div>
       </section>
 
       <footer className="border-t border-white/[0.07]">
         <div className="mx-auto flex max-w-7xl flex-col gap-5 px-6 py-9 text-xs text-zinc-600 sm:flex-row sm:items-center sm:justify-between lg:px-8">
           <div><Brand /><p className="mt-2">A product by Wolvesgang Digital</p></div>
-          <div className="flex flex-wrap gap-5"><Link href="/auth/login" className="hover:text-white">Sign in</Link></div>
+          <div className="flex flex-wrap gap-5"><Link href={accountHref} className="hover:text-white">{accountLabel}</Link></div>
         </div>
       </footer>
     </main>

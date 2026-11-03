@@ -14,6 +14,7 @@ import {
 import { Brand } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import LuxuryLanding from "@/components/luxury-landing";
+import { createClient } from "@/lib/supabase/server";
 
 const steps = [
   { icon: Upload, number: "01", title: "Upload Video", copy: "Bring your podcast, interview, webinar, tutorial, or vlog." },
@@ -161,5 +162,8 @@ export function LegacyLandingPage() {
   );
 }
 
-export default LuxuryLanding;
+export default async function HomePage() {
+  const { data } = await (await createClient()).auth.getClaims();
+  return <LuxuryLanding signedIn={Boolean(data?.claims?.sub)} />;
+}
 

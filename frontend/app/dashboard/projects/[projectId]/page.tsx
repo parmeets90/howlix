@@ -19,6 +19,7 @@ import {
 
 import { MultipartUploader } from "@/components/multipart-uploader";
 import { YouTubeImporter } from "@/components/youtube-importer";
+import { WaitingArcade } from "@/components/waiting-arcade";
 import { TranscriptViewer } from "@/components/transcript-viewer";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -41,6 +42,7 @@ const ACTIVE_STATUSES = new Set<MediaAssetStatus>([
   "uploaded",
   "validating",
 ]);
+const PREPARING_STATUSES = new Set<MediaAssetStatus>(["uploaded", "validating"]);
 
 function formatDuration(seconds: number | null): string {
   if (seconds === null) return "—";
@@ -52,6 +54,11 @@ function formatDuration(seconds: number | null): string {
 function MediaStatus({ status }: { status: MediaAssetStatus }) {
   const active = ACTIVE_STATUSES.has(status);
   const ready = status === "ready";
+  const activeLabel = status === "importing"
+    ? "Importing video"
+    : PREPARING_STATUSES.has(status)
+      ? "Analyzing upload"
+      : "Uploading";
   return (
     <span
       className={cn(
@@ -62,7 +69,7 @@ function MediaStatus({ status }: { status: MediaAssetStatus }) {
       )}
     >
       {active ? <LoaderCircle className="h-3 w-3 animate-spin" /> : ready ? <CheckCircle2 className="h-3 w-3" /> : <AlertCircle className="h-3 w-3" />}
-      {ready ? "Ready" : active ? "Getting ready" : "Needs help"}
+      {ready ? "Ready" : active ? activeLabel : "Needs help"}
     </span>
   );
 }
@@ -199,7 +206,7 @@ export default function ProjectDetailPage() {
                           <div><dt className="text-xs text-zinc-600">Picture size</dt><dd className="mt-1 text-zinc-300">{asset.width && asset.height ? `${asset.width} × ${asset.height}` : "—"}</dd></div>
                         </dl>
                         {asset.latest_job?.error_message && <div className="mt-5 flex gap-2 rounded-lg border border-red-400/15 bg-red-400/[0.04] p-3 text-xs leading-5 text-red-200"><AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {asset.latest_job.error_message}</div>}
-                        {ACTIVE_STATUSES.has(asset.status) && <p className="mt-5 flex items-center gap-2 text-xs text-zinc-500"><Clock3 className="h-3.5 w-3.5" /> Howlix is getting your video ready. You can leave this page.</p>}
+                        {ACTIVE_STATUSES.has(asset.status) && <><p className="mt-5 flex items-start gap-2 text-xs leading-5 text-zinc-500"><Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {PREPARING_STATUSES.has(asset.status) ? "Analyzing your upload. Howlix is checking the video and preparing it for the next steps. This can take a few minutes." : asset.status === "importing" ? "Importing and checking your YouTube video. This can take a few minutes." : "Uploading your video. Keep this page open until the upload finishes."}</p>{PREPARING_STATUSES.has(asset.status) && <WaitingArcade />}</>}
                         {asset.status === "ready" && <TranscriptViewer assetId={asset.id} videoElementId={`video-${asset.id}`} />}
                       </div>
                     </CardContent>

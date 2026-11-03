@@ -5,6 +5,7 @@ import { AlertCircle, CheckCircle2, ExternalLink, LoaderCircle, RotateCcw, X } f
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { WaitingArcade } from "@/components/waiting-arcade";
 import {
   cancelYouTubeImport,
   createYouTubeImport,
@@ -130,16 +131,17 @@ export function YouTubeImporter({
                   </div>
                   <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-300/15 bg-violet-300/[0.06] px-2.5 py-1 text-xs capitalize text-violet-200">
                     {active ? <LoaderCircle className="h-3 w-3 animate-spin" /> : completed ? <CheckCircle2 className="h-3 w-3 text-emerald-300" /> : <AlertCircle className="h-3 w-3 text-red-300" />}
-                    {completed ? "Ready" : active ? "Getting ready" : "Needs help"}
+                    {completed ? "Ready" : active ? "Importing video" : "Needs help"}
                   </span>
                 </div>
-                {active && <p className="mt-3 text-xs text-zinc-500">Getting your video ready{value.job?.progress_completed ? ` · ${formatFileSize(value.job.progress_completed)} received` : ""}</p>}
+                {active && <p className="mt-3 text-xs leading-5 text-zinc-500">Importing and checking your YouTube video. This can take a few minutes{value.job?.progress_completed ? ` · ${formatFileSize(value.job.progress_completed)} received` : ""}.</p>}
                 {(value.error_message || value.job?.dispatch_error_message) && <p className="mt-3 text-xs leading-5 text-red-200">{value.error_message || value.job?.dispatch_error_message}</p>}
                 <div className="mt-3 flex gap-2">
                   {active && <Button type="button" size="sm" variant="ghost" onClick={() => void action(value.id, "cancel")}><X className="h-3.5 w-3.5" /> Cancel</Button>}
                   {active && value.job?.dispatch_error_message && <Button type="button" size="sm" variant="secondary" onClick={() => void retryRunner(value.job!.id)}><RotateCcw className="h-3.5 w-3.5" /> Try again</Button>}
                   {(value.status === "failed" || value.status === "cancelled") && <Button type="button" size="sm" variant="secondary" onClick={() => void action(value.id, "retry")}><RotateCcw className="h-3.5 w-3.5" /> Try again</Button>}
                 </div>
+                {active && <WaitingArcade />}
               </div>
             );
           })}

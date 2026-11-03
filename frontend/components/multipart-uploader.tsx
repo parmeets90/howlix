@@ -395,7 +395,7 @@ export const MultipartUploader = forwardRef<MultipartUploaderHandle, {
 
           {status !== "selected" && status !== "idle" && (
             <div className="mt-5">
-              <div className="flex items-center justify-between text-xs"><span className="capitalize text-zinc-400">{status === "verifying" ? "Checking your video" : status === "processing" ? "Getting your video ready" : status}</span><span className="font-mono text-zinc-500">{progress.toFixed(1)}%</span></div>
+              <div className="flex items-center justify-between text-xs"><span className="capitalize text-zinc-400">{status === "verifying" ? "Checking your upload" : status === "processing" ? "Analyzing your upload" : status}</span><span className="font-mono text-zinc-500">{progress.toFixed(1)}%</span></div>
               <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/[0.06]"><div className="h-full rounded-full bg-violet-500 transition-[width] duration-150" style={{ width: `${progress}%` }} /></div>
             </div>
           )}
@@ -405,7 +405,7 @@ export const MultipartUploader = forwardRef<MultipartUploaderHandle, {
             {status === "uploading" && <Button type="button" size="sm" variant="secondary" onClick={pauseUpload}><CirclePause className="h-3.5 w-3.5" /> Pause</Button>}
             {status === "paused" && <Button type="button" size="sm" onClick={resumeUpload}><CirclePlay className="h-3.5 w-3.5" /> Resume</Button>}
             {active && status !== "processing" && <Button type="button" size="sm" variant="ghost" onClick={() => void cancelUpload()}><X className="h-3.5 w-3.5" /> Cancel</Button>}
-            {(status === "verifying" || status === "processing") && <span className="inline-flex items-center gap-2 px-2 text-xs text-zinc-500"><LoaderCircle className="h-3.5 w-3.5 animate-spin" /> {status === "verifying" ? "Checking everything" : "Getting your video ready"}</span>}
+            {(status === "verifying" || status === "processing") && <span className="inline-flex items-center gap-2 px-2 text-xs text-zinc-500"><LoaderCircle className="h-3.5 w-3.5 animate-spin" /> {status === "verifying" ? "Checking your upload" : "Analyzing your upload"}</span>}
             {status === "completed" && <span className="inline-flex items-center gap-2 text-sm text-emerald-300"><Check className="h-4 w-4" /> Video added</span>}
             {status === "cancelled" && <Button type="button" size="sm" variant="secondary" onClick={() => { setSelectedFile(null); setStatus("idle"); }}><RefreshCw className="h-3.5 w-3.5" /> Choose another file</Button>}
           </div>
