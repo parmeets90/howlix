@@ -31,6 +31,7 @@ import {
   type MediaAssetStatus,
   type Project,
 } from "@/lib/api";
+import { mergeMediaWithoutReloadingVideo } from "@/lib/media-polling";
 import { cn, formatFileSize } from "@/lib/utils";
 
 const ACTIVE_STATUSES = new Set<MediaAssetStatus>([
@@ -137,10 +138,22 @@ export default function ProjectDetailPage() {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  const hasActiveMedia = media.some((asset) => ACTIVE_STATUSES.has(asset.status));
+
+  useEffect(() => {
+    if (!hasActiveMedia) return;
+    let cancelled = false;
     const interval = window.setInterval(() => {
       listProjectMedia(projectId)
         .then((nextMedia) => {
-          if (!cancelled) setMedia(nextMedia);
+          if (!cancelled) {
+            setMedia((current) => mergeMediaWithoutReloadingVideo(current, nextMedia));
+          }
         })
         .catch(() => undefined);
     }, 4000);
@@ -148,7 +161,7 @@ export default function ProjectDetailPage() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [projectId]);
+  }, [hasActiveMedia, projectId]);
 
   return (
     <main className="mx-auto max-w-6xl px-5 py-10 sm:px-8 sm:py-12">
