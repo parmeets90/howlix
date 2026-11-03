@@ -164,6 +164,8 @@ def test_workflow_uses_trusted_main_and_scopes_secrets_to_worker_step() -> None:
     assert "if: github.ref == 'refs/heads/main'" in workflow
     assert "ref: main" in workflow
     assert "persist-credentials: false" in workflow
+    assert "${{ runner.temp }}" not in workflow
+    assert "PROCESSING_TEMP_DIR: /tmp/howlix" in workflow
     process_step = workflow.index("- name: Process exactly one persisted job")
     assert workflow.index("${{ secrets.") > process_step
     assert "generate_get_url" not in workflow
