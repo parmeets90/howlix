@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { AlertCircle, FileText, LoaderCircle, RefreshCw, Search, Sparkles } from "lucide-react";
 
 import { Button } from "./ui/button";
@@ -39,6 +39,7 @@ export function TranscriptViewer({ assetId, videoElementId }: { assetId: string;
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const deferredQuery = useDeferredValue(query);
 
   const refresh = useCallback(async () => {
     try {
@@ -67,8 +68,8 @@ export function TranscriptViewer({ assetId, videoElementId }: { assetId: string;
   }, [refresh, status]);
 
   const visibleSegments = useMemo(
-    () => filterTranscriptSegments(transcript?.segments ?? [], query),
-    [query, transcript],
+    () => filterTranscriptSegments(transcript?.segments ?? [], deferredQuery),
+    [deferredQuery, transcript],
   );
 
   async function start() {
@@ -150,7 +151,7 @@ export function TranscriptViewer({ assetId, videoElementId }: { assetId: string;
           </div>
           <div className="mt-4 max-h-80 space-y-1 overflow-y-auto rounded-xl border border-white/[0.06] bg-black/20 p-2">
             {visibleSegments.map((segment) => (
-              <button key={segment.id} type="button" onClick={() => seek(segment.start_ms)} className="grid w-full grid-cols-[3.25rem_1fr] gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400">
+              <button key={segment.id} type="button" onClick={() => seek(segment.start_ms)} className="content-auto grid w-full grid-cols-[3.25rem_1fr] gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400">
                 <span className="font-mono text-xs text-violet-300">{timestamp(segment.start_ms)}</span>
                 <span className="text-sm leading-6 text-zinc-300">{segment.text}</span>
               </button>

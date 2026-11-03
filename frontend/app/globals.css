@@ -11,6 +11,8 @@
   --muted-foreground: 240 4% 65%;
   --primary: 263 70% 60%;
   --primary-foreground: 0 0% 100%;
+  --surface-highlight: rgba(255, 255, 255, 0.065);
+  --surface-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
 }
 
 * {
@@ -30,6 +32,11 @@ body {
   color: hsl(var(--foreground));
   font-family: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
   text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+button, a, input, textarea, select {
+  -webkit-tap-highlight-color: transparent;
 }
 
 ::selection {
@@ -40,6 +47,62 @@ body {
   .text-balance {
     text-wrap: balance;
   }
+
+  .content-auto {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 520px;
+  }
+}
+
+.app-shell {
+  background:
+    radial-gradient(circle at 82% -8%, rgba(139, 92, 246, 0.11), transparent 30rem),
+    radial-gradient(circle at 18% 105%, rgba(76, 29, 149, 0.08), transparent 34rem),
+    #08070b;
+}
+
+.app-page {
+  animation: app-page-in 520ms cubic-bezier(.22, 1, .36, 1) both;
+}
+
+.app-grid-glow {
+  position: relative;
+  isolation: isolate;
+}
+
+.app-grid-glow::before {
+  position: absolute;
+  inset: -1px;
+  z-index: -1;
+  border-radius: inherit;
+  background: linear-gradient(130deg, rgba(167, 139, 250, 0.22), transparent 28%, transparent 70%, rgba(217, 70, 239, 0.09));
+  content: "";
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+
+.app-grid-glow:hover::before {
+  opacity: 1;
+}
+
+.surface-noise {
+  background-image: radial-gradient(rgba(255,255,255,.055) .55px, transparent .55px);
+  background-size: 7px 7px;
+}
+
+.stagger-item {
+  animation: stagger-rise 560ms cubic-bezier(.22, 1, .36, 1) both;
+  animation-delay: calc(var(--stagger, 0) * 55ms);
+}
+
+@keyframes app-page-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes stagger-rise {
+  from { opacity: 0; transform: translateY(14px) scale(.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .luxury-page {
@@ -89,6 +152,8 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .luxury-reveal, .luxury-float, .luxury-float-reverse { animation: none !important; }
+  html { scroll-behavior: auto; }
+  .luxury-reveal, .luxury-float, .luxury-float-reverse, .app-page, .stagger-item { animation: none !important; }
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
 }
 

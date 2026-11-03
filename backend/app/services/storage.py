@@ -81,7 +81,9 @@ class R2StorageService:
             region_name=settings.r2_region,
             config=Config(
                 signature_version="s3v4",
-                retries={"max_attempts": 4, "mode": "standard"},
+                connect_timeout=settings.r2_connect_timeout_seconds,
+                read_timeout=settings.r2_read_timeout_seconds,
+                retries={"max_attempts": settings.r2_max_attempts, "mode": "standard"},
             ),
         )
 

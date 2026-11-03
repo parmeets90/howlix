@@ -164,7 +164,7 @@ export default function ProjectDetailPage() {
   }, [hasActiveMedia, projectId]);
 
   return (
-    <main className="mx-auto max-w-6xl px-5 py-10 sm:px-8 sm:py-12">
+    <main className="app-page mx-auto max-w-7xl px-5 py-8 sm:px-8 sm:py-10 lg:px-10">
       <Button asChild variant="ghost" size="sm" className="-ml-3 text-zinc-500"><Link href="/dashboard"><ArrowLeft className="h-4 w-4" /> Back to projects</Link></Button>
 
       {loading ? (
@@ -173,21 +173,21 @@ export default function ProjectDetailPage() {
         <Card className="mt-8 border-red-400/15"><CardContent className="flex items-center justify-between gap-4 p-6"><div className="flex items-center gap-3 text-sm text-red-200"><AlertCircle className="h-5 w-5" /> {error}</div><Button size="sm" variant="secondary" onClick={() => void refresh(true)}><RefreshCw className="h-4 w-4" /> Retry</Button></CardContent></Card>
       ) : project ? (
         <>
-          <div className="mt-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-            <div><p className="text-sm font-medium text-violet-300">Project</p><h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-white sm:text-4xl">{project.title}</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-500">{project.description ?? "No project description."}</p></div>
-            <div className="flex flex-wrap items-center gap-3"><div className="flex items-center gap-2 text-xs text-zinc-600"><ShieldCheck className="h-4 w-4 text-violet-300" /> Only you can see this</div><Button type="button" size="sm" variant="ghost" className="text-red-300 hover:text-red-200" onClick={() => void removeProject()} disabled={deleting !== null}><Trash2 className="h-3.5 w-3.5" /> {deleting === project.id ? "Deleting…" : "Delete project"}</Button></div>
+          <div className="mt-6 flex flex-col gap-6 rounded-[1.5rem] border border-white/[0.075] bg-gradient-to-br from-white/[0.045] to-transparent p-6 shadow-[0_24px_70px_rgba(0,0,0,.18)] sm:p-7 lg:flex-row lg:items-end lg:justify-between">
+            <div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-300">Project</p><h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-white sm:text-4xl">{project.title}</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-500">{project.description ?? "No project description."}</p></div>
+            <div className="flex flex-wrap items-center gap-3"><div className="flex items-center gap-2 rounded-full border border-white/[0.07] bg-black/15 px-3 py-2 text-xs text-zinc-500"><ShieldCheck className="h-4 w-4 text-violet-300" /> Only you can see this</div><Button type="button" size="sm" variant="ghost" className="text-red-300 hover:text-red-200" onClick={() => void removeProject()} disabled={deleting !== null}><Trash2 className="h-3.5 w-3.5" /> {deleting === project.id ? "Deleting…" : "Delete project"}</Button></div>
           </div>
           {error && <div role="alert" className="mt-6 flex items-start gap-3 rounded-xl border border-red-400/15 bg-red-400/[0.045] p-4 text-sm text-red-200"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> {error}</div>}
 
-          <section className="mt-10" aria-labelledby="media-heading">
-            <div className="flex items-center justify-between"><h2 id="media-heading" className="text-sm font-medium text-zinc-300">Your videos</h2><span className="text-xs text-zinc-600">{media.length} {media.length === 1 ? "video" : "videos"}</span></div>
+          <section className="content-auto mt-10" aria-labelledby="media-heading">
+            <div className="flex items-center justify-between"><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-violet-300">Library</p><h2 id="media-heading" className="mt-1.5 text-xl font-semibold tracking-[-0.025em] text-white">Your videos</h2></div><span className="rounded-full border border-white/[0.07] bg-white/[0.03] px-3 py-1.5 text-xs text-zinc-500">{media.length} {media.length === 1 ? "video" : "videos"}</span></div>
             {media.length === 0 ? (
               <div className="mt-4 rounded-2xl border border-dashed border-white/10 bg-white/[0.018] px-6 py-12 text-center"><FileVideo className="mx-auto h-6 w-6 text-violet-300" /><p className="mt-4 text-sm font-medium text-zinc-200">No video yet</p><p className="mt-2 text-xs text-zinc-600">Choose a video below to get started.</p></div>
             ) : (
-              <div className="mt-4 space-y-4">
+              <div className="mt-5 space-y-5">
                 {media.map((asset) => (
-                  <Card key={asset.id}>
-                    <CardContent className="grid gap-6 p-5 lg:grid-cols-[1fr_1.2fr]">
+                  <Card key={asset.id} className="overflow-hidden">
+                    <CardContent className="grid gap-6 p-5 sm:p-6 lg:grid-cols-[minmax(18rem,.85fr)_minmax(0,1.15fr)] lg:gap-8">
                       <div className="flex min-h-48 items-center justify-center overflow-hidden rounded-xl border border-white/[0.06] bg-black/30">
                         {asset.preview_url ? <video id={`video-${asset.id}`} controls preload="metadata" src={asset.preview_url} className="h-full max-h-80 w-full bg-black object-contain" /> : <div className="text-center"><FileVideo className="mx-auto h-7 w-7 text-zinc-700" /><p className="mt-3 text-xs text-zinc-600">Your video will appear here when it is ready</p></div>}
                       </div>
@@ -209,12 +209,12 @@ export default function ProjectDetailPage() {
             )}
           </section>
 
-          <Card className="mt-8">
+          <Card className="content-auto mt-8 overflow-hidden">
             <CardHeader><CardTitle>Add another video</CardTitle><CardDescription>Choose a video from your device or use a YouTube link.</CardDescription></CardHeader>
             <CardContent>
               <div role="tablist" aria-label="Video source" className="mb-5 grid gap-3 sm:grid-cols-2">
-                <button type="button" role="tab" aria-selected={source === "upload"} onClick={() => setSource("upload")} className={`rounded-2xl border p-4 text-left transition ${source === "upload" ? "border-violet-400/40 bg-violet-500/10 text-white" : "border-white/[0.07] bg-black/10 text-zinc-500"}`}><UploadCloud className="h-5 w-5 text-violet-300" /><span className="mt-3 block text-sm font-medium">Choose a video</span><span className="mt-1 block text-xs opacity-70">Pick one from this device.</span></button>
-                <button type="button" role="tab" aria-selected={source === "youtube"} onClick={() => setSource("youtube")} className={`rounded-2xl border p-4 text-left transition ${source === "youtube" ? "border-violet-400/40 bg-violet-500/10 text-white" : "border-white/[0.07] bg-black/10 text-zinc-500"}`}><Youtube className="h-5 w-5 text-violet-300" /><span className="mt-3 block text-sm font-medium">Use a YouTube link</span><span className="mt-1 block text-xs opacity-70">Only use videos you are allowed to use.</span></button>
+                <button type="button" role="tab" aria-selected={source === "upload"} onClick={() => setSource("upload")} className={`group rounded-2xl border p-4 text-left transition-all duration-200 ${source === "upload" ? "border-violet-400/40 bg-gradient-to-br from-violet-500/15 to-violet-500/[0.04] text-white" : "border-white/[0.07] bg-black/10 text-zinc-500 hover:-translate-y-0.5 hover:border-white/15"}`}><UploadCloud className="h-5 w-5 text-violet-300 transition-transform group-hover:scale-110" /><span className="mt-3 block text-sm font-medium">Choose a video</span><span className="mt-1 block text-xs opacity-70">Pick one from this device.</span></button>
+                <button type="button" role="tab" aria-selected={source === "youtube"} onClick={() => setSource("youtube")} className={`group rounded-2xl border p-4 text-left transition-all duration-200 ${source === "youtube" ? "border-violet-400/40 bg-gradient-to-br from-violet-500/15 to-violet-500/[0.04] text-white" : "border-white/[0.07] bg-black/10 text-zinc-500 hover:-translate-y-0.5 hover:border-white/15"}`}><Youtube className="h-5 w-5 text-violet-300 transition-transform group-hover:scale-110" /><span className="mt-3 block text-sm font-medium">Use a YouTube link</span><span className="mt-1 block text-xs opacity-70">Only use videos you are allowed to use.</span></button>
               </div>
               {source === "upload" ? <MultipartUploader projectId={project.id} onUploadComplete={() => void refresh()} /> : <YouTubeImporter projectId={project.id} onImportChanged={() => void refresh()} />}
             </CardContent>

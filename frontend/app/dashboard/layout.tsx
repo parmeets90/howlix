@@ -12,7 +12,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const { data } = await (await createClient()).auth.getClaims();
   if (!data?.claims?.sub) redirect("/auth/login");
   return (
-    <div className="flex min-h-screen bg-[#08070b]">
+    <div className="app-shell flex min-h-screen">
       <Sidebar />
       <div className="min-w-0 flex-1">
         <TopNavigation />

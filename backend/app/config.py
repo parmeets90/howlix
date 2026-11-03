@@ -64,6 +64,15 @@ class Settings(BaseSettings):
     r2_bucket_name: str = Field(default="howlix-media", validation_alias="R2_BUCKET_NAME")
     r2_endpoint_url: str | None = Field(default=None, validation_alias="R2_ENDPOINT_URL")
     r2_region: str = Field(default="auto", validation_alias="R2_REGION")
+    r2_connect_timeout_seconds: int = Field(
+        default=5, ge=1, le=30, validation_alias="R2_CONNECT_TIMEOUT_SECONDS"
+    )
+    r2_read_timeout_seconds: int = Field(
+        default=20, ge=2, le=60, validation_alias="R2_READ_TIMEOUT_SECONDS"
+    )
+    r2_max_attempts: int = Field(
+        default=3, ge=1, le=5, validation_alias="R2_MAX_ATTEMPTS"
+    )
 
     max_upload_size_mb: int = Field(default=1024, ge=1, validation_alias="MAX_UPLOAD_SIZE_MB")
     max_video_duration_seconds: int = Field(
