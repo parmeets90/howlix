@@ -171,7 +171,7 @@ export default function LuxuryLanding() {
       <footer className="border-t border-white/[0.07]">
         <div className="mx-auto flex max-w-7xl flex-col gap-5 px-6 py-9 text-xs text-zinc-600 sm:flex-row sm:items-center sm:justify-between lg:px-8">
           <div><Brand /><p className="mt-2">A product by Wolvesgang Digital</p></div>
-          <div className="flex flex-wrap gap-5"><Link href="/auth/login" className="hover:text-white">Sign in</Link><a href="https://www.pexels.com" target="_blank" rel="noreferrer" className="hover:text-white">Photography via Pexels</a></div>
+          <div className="flex flex-wrap gap-5"><Link href="/auth/login" className="hover:text-white">Sign in</Link></div>
         </div>
       </footer>
     </main>
