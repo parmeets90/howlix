@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
   AlertCircle,
   ArrowLeft,
@@ -12,6 +12,7 @@ import {
   LoaderCircle,
   RefreshCw,
   ShieldCheck,
+  Trash2,
   UploadCloud,
   Youtube,
 } from "lucide-react";
@@ -23,6 +24,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   getProject,
+  deleteMediaAsset,
+  deleteProject,
   listProjectMedia,
   type MediaAsset,
   type MediaAssetStatus,
@@ -65,11 +68,41 @@ function MediaStatus({ status }: { status: MediaAssetStatus }) {
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const router = useRouter();
   const [project, setProject] = useState<Project | null>(null);
   const [media, setMedia] = useState<MediaAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [source, setSource] = useState<"upload" | "youtube">("upload");
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  async function removeVideo(asset: MediaAsset) {
+    if (!window.confirm(`Delete ${asset.original_filename}? This also deletes its clips and cannot be undone.`)) return;
+    setDeleting(asset.id);
+    setError(null);
+    try {
+      await deleteMediaAsset(asset.id);
+      setMedia((current) => current.filter((item) => item.id !== asset.id));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The video could not be deleted.");
+    } finally {
+      setDeleting(null);
+    }
+  }
+
+  async function removeProject() {
+    if (!project || !window.confirm(`Delete “${project.title}”? Every video and clip in this project will be permanently deleted.`)) return;
+    setDeleting(project.id);
+    setError(null);
+    try {
+      await deleteProject(project.id);
+      router.push("/dashboard");
+      router.refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The project could not be deleted.");
+      setDeleting(null);
+    }
+  }
 
   async function refresh(showLoading = false) {
     if (showLoading) setLoading(true);
@@ -129,8 +162,9 @@ export default function ProjectDetailPage() {
         <>
           <div className="mt-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div><p className="text-sm font-medium text-violet-300">Project</p><h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-white sm:text-4xl">{project.title}</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-500">{project.description ?? "No project description."}</p></div>
-            <div className="flex items-center gap-2 text-xs text-zinc-600"><ShieldCheck className="h-4 w-4 text-violet-300" /> Only you can see this</div>
+            <div className="flex flex-wrap items-center gap-3"><div className="flex items-center gap-2 text-xs text-zinc-600"><ShieldCheck className="h-4 w-4 text-violet-300" /> Only you can see this</div><Button type="button" size="sm" variant="ghost" className="text-red-300 hover:text-red-200" onClick={() => void removeProject()} disabled={deleting !== null}><Trash2 className="h-3.5 w-3.5" /> {deleting === project.id ? "Deleting…" : "Delete project"}</Button></div>
           </div>
+          {error && <div role="alert" className="mt-6 flex items-start gap-3 rounded-xl border border-red-400/15 bg-red-400/[0.045] p-4 text-sm text-red-200"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> {error}</div>}
 
           <section className="mt-10" aria-labelledby="media-heading">
             <div className="flex items-center justify-between"><h2 id="media-heading" className="text-sm font-medium text-zinc-300">Your videos</h2><span className="text-xs text-zinc-600">{media.length} {media.length === 1 ? "video" : "videos"}</span></div>
@@ -145,7 +179,7 @@ export default function ProjectDetailPage() {
                         {asset.preview_url ? <video id={`video-${asset.id}`} controls preload="metadata" src={asset.preview_url} className="h-full max-h-80 w-full bg-black object-contain" /> : <div className="text-center"><FileVideo className="mx-auto h-7 w-7 text-zinc-700" /><p className="mt-3 text-xs text-zinc-600">Your video will appear here when it is ready</p></div>}
                       </div>
                       <div>
-                        <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-medium text-white">{asset.original_filename}</h3><p className="mt-1 text-xs text-zinc-600">Uploaded {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(asset.created_at))}</p></div><MediaStatus status={asset.status} /></div>
+                        <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-medium text-white">{asset.original_filename}</h3><p className="mt-1 text-xs text-zinc-600">Uploaded {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(asset.created_at))}</p></div><div className="flex items-center gap-2"><MediaStatus status={asset.status} /><Button type="button" size="icon" variant="ghost" aria-label={`Delete ${asset.original_filename}`} className="text-zinc-500 hover:text-red-300" onClick={() => void removeVideo(asset)} disabled={deleting !== null}><Trash2 className="h-4 w-4" /></Button></div></div>
                         <dl className="mt-6 grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
                           <div><dt className="text-xs text-zinc-600">File size</dt><dd className="mt-1 text-zinc-300">{formatFileSize(asset.file_size_bytes)}</dd></div>
                           <div><dt className="text-xs text-zinc-600">Length</dt><dd className="mt-1 text-zinc-300">{formatDuration(asset.duration_seconds)}</dd></div>

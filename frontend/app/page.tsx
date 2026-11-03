@@ -13,6 +13,7 @@ import {
 
 import { Brand } from "@/components/brand";
 import { Button } from "@/components/ui/button";
+import LuxuryLanding from "@/components/luxury-landing";
 
 const steps = [
   { icon: Upload, number: "01", title: "Upload Video", copy: "Bring your podcast, interview, webinar, tutorial, or vlog." },
@@ -26,7 +27,7 @@ const previews = [
   { icon: Captions, title: "Short-ready output", copy: "Build polished vertical clips with readable animated captions and smart framing.", label: "Planned export" },
 ];
 
-export default function LandingPage() {
+export function LegacyLandingPage() {
   return (
     <main className="overflow-hidden">
       <header className="mx-auto flex max-w-7xl items-center justify-between px-6 py-6 lg:px-8">
@@ -159,4 +160,6 @@ export default function LandingPage() {
     </main>
   );
 }
+
+export default LuxuryLanding;
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,7 @@ from app.database import get_db
 from app.models import MediaAsset, ProcessingJob, Project
 from app.schemas import MediaAssetResponse
 from app.services.storage import StorageError, StorageService, get_storage_service
+from app.services.deletion import asset_has_active_work, delete_asset
 
 
 router = APIRouter(tags=["media"])
@@ -76,3 +77,32 @@ def get_media_asset(
         return media_asset_response(asset, _latest_job(db, asset.id, user.id), storage, settings)
     except StorageError as exc:
         raise HTTPException(status_code=502, detail="Could not sign the private preview URL.") from exc
+
+
+@router.delete("/media/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_media_asset(
+    asset_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    user: AuthenticatedUser = Depends(require_user),
+) -> Response:
+    asset = db.scalar(
+        select(MediaAsset).where(MediaAsset.id == asset_id, MediaAsset.owner_id == user.id)
+    )
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Video not found")
+    if asset_has_active_work(db, asset.id):
+        raise HTTPException(
+            status_code=409,
+            detail="This video is still being prepared. Please wait a moment and try again.",
+        )
+    try:
+        delete_asset(db, storage, asset)
+        db.commit()
+    except StorageError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=502,
+            detail="The video could not be removed from storage. Please try again.",
+        ) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

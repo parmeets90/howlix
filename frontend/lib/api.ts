@@ -275,6 +275,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
 
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
@@ -300,6 +301,10 @@ export function createProject(input: CreateProjectInput): Promise<Project> {
 
 export function getProject(projectId: string): Promise<Project> {
   return request<Project>(`/api/v1/projects/${projectId}`, { cache: "no-store" });
+}
+
+export function deleteProject(projectId: string): Promise<void> {
+  return request<void>(`/api/v1/projects/${projectId}`, { method: "DELETE" });
 }
 
 export function initiateUpload(
@@ -380,6 +385,10 @@ export function listProjectMedia(projectId: string): Promise<MediaAsset[]> {
 
 export function getMediaAsset(assetId: string): Promise<MediaAsset> {
   return request(`/api/v1/media/${assetId}`, { cache: "no-store" });
+}
+
+export function deleteMediaAsset(assetId: string): Promise<void> {
+  return request<void>(`/api/v1/media/${assetId}`, { method: "DELETE" });
 }
 
 export function requestTranscription(assetId: string): Promise<TranscriptionStatus> {
