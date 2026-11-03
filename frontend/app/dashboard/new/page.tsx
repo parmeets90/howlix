@@ -100,7 +100,7 @@ export default function NewProjectPage() {
         </Card>
 
         {error && <div role="alert" className="flex items-start gap-3 rounded-xl border border-red-400/15 bg-red-400/[0.045] p-4 text-sm text-red-200"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> {error}</div>}
-        <div className="sticky bottom-4 z-20 flex flex-col-reverse items-stretch gap-3 rounded-2xl border border-white/[0.09] bg-[#0c0b10]/90 p-3 shadow-[0_22px_60px_rgba(0,0,0,.45)] backdrop-blur-xl sm:flex-row sm:items-center sm:justify-end"><span className="px-2 text-center text-xs text-zinc-600 sm:mr-auto sm:text-left">One click starts everything.</span><Button asChild type="button" variant="ghost"><Link href="/dashboard">Cancel</Link></Button><Button type="submit" className="min-w-40" disabled={submitting || !ready || Boolean(createdProject)}>{submitting ? <><LoaderCircle className="h-4 w-4 animate-spin" /> Starting&hellip;</> : "Start my project"}</Button></div>
+        <div className="z-20 flex flex-col-reverse items-stretch gap-3 rounded-2xl border border-white/[0.09] bg-[#0c0b10]/90 p-3 shadow-[0_22px_60px_rgba(0,0,0,.45)] backdrop-blur-xl sm:sticky sm:bottom-4 sm:flex-row sm:items-center sm:justify-end"><span className="px-2 text-center text-xs text-zinc-600 sm:mr-auto sm:text-left">One click starts everything.</span><Button asChild type="button" variant="ghost"><Link href="/dashboard">Cancel</Link></Button><Button type="submit" className="min-w-40" disabled={submitting || !ready || Boolean(createdProject)}>{submitting ? <><LoaderCircle className="h-4 w-4 animate-spin" /> Starting&hellip;</> : "Start my project"}</Button></div>
       </form>
     </main>
   );
