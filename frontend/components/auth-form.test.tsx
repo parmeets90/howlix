@@ -1,9 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
+let searchParams = new URLSearchParams();
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => searchParams,
 }));
 vi.mock("@/lib/supabase/client", () => ({ createClient: vi.fn() }));
 
@@ -25,5 +27,13 @@ describe("private beta authentication", () => {
     expect(markup).toContain("Create account");
     expect(markup).toContain("Continue with Google");
     expect(markup).toContain('minLength="8"');
+  });
+
+  it("treats an already-used confirmation link as a helpful notice", () => {
+    searchParams = new URLSearchParams("notice=confirmation");
+    const markup = renderToStaticMarkup(<AuthForm mode="login" />);
+    expect(markup).toContain("Your email may already be verified");
+    expect(markup).not.toContain("invalid or has expired");
+    searchParams = new URLSearchParams();
   });
 });

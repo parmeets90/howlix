@@ -12,11 +12,14 @@ export async function GET(request: Request) {
     ? requestedNext
     : "/dashboard";
   if (tokenHash && type) {
-    const { error } = await (await createClient()).auth.verifyOtp({
+    const supabase = await createClient();
+    const { error } = await supabase.auth.verifyOtp({
       type,
       token_hash: tokenHash,
     });
     if (!error) return NextResponse.redirect(new URL(next, url.origin));
+    const { data } = await supabase.auth.getClaims();
+    if (data?.claims?.sub) return NextResponse.redirect(new URL(next, url.origin));
   }
-  return NextResponse.redirect(new URL("/auth/login?error=confirmation", url.origin));
+  return NextResponse.redirect(new URL("/auth/login?notice=confirmation", url.origin));
 }

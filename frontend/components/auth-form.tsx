@@ -26,8 +26,11 @@ export function AuthForm({ mode }: { mode: Mode }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const confirmationNotice = search.get("notice") === "confirmation"
+    ? "Your email may already be verified. Sign in to continue. If it is not verified yet, create the account again to receive a fresh link."
+    : null;
   const visibleError = error ?? (
-    search.get("error") ? "That authentication link is invalid or has expired. Request a new one." : null
+    search.get("error") ? "Sign-in could not be completed. Please try again." : null
   );
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -98,6 +101,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
         )}
         {message ? <div className="flex gap-3 rounded-xl border border-emerald-400/15 bg-emerald-400/[0.05] p-4 text-sm text-emerald-200"><MailCheck className="h-5 w-5 shrink-0" />{message}</div> : (
           <form onSubmit={submit} className="space-y-4">
+            {confirmationNotice && <div className="flex gap-3 rounded-xl border border-emerald-400/15 bg-emerald-400/[0.05] p-4 text-sm leading-6 text-emerald-100"><MailCheck className="mt-0.5 h-5 w-5 shrink-0" />{confirmationNotice}</div>}
             <label className="block"><span className="mb-2 block text-sm text-zinc-300">Email</span><Input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} /></label>
             {mode !== "forgot" && <label className="block"><span className="mb-2 block text-sm text-zinc-300">Password</span><Input type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} /></label>}
             {visibleError && <div role="alert" className="flex gap-2 rounded-lg border border-red-400/15 bg-red-400/[0.04] p-3 text-sm text-red-200"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{visibleError}</div>}
